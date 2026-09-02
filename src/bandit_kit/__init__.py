@@ -31,6 +31,7 @@ from .metrics import (
     cumulative_regret,
     cumulative_reward,
 )
+from .reporting import render_markdown_report
 
 __all__ = [
     "Arm",
@@ -56,4 +57,5 @@ __all__ = [
     "cumulative_regret",
     "arm_selection_counts",
     "arm_selection_fractions",
+    "render_markdown_report",
 ]
