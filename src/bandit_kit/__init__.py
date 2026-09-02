@@ -18,6 +18,19 @@ from .arms import (
     best_arm,
     expected_payoffs,
 )
+from .experiment import (
+    BanditExperiment,
+    BanditRunResult,
+    available_algorithms,
+    run_experiment,
+    summarize_runs,
+)
+from .metrics import (
+    arm_selection_counts,
+    arm_selection_fractions,
+    cumulative_regret,
+    cumulative_reward,
+)
 
 __all__ = [
     "Arm",
@@ -34,4 +47,13 @@ __all__ = [
     "epsilon_greedy",
     "ucb1",
     "thompson_sampling_bernoulli",
+    "BanditExperiment",
+    "BanditRunResult",
+    "available_algorithms",
+    "run_experiment",
+    "summarize_runs",
+    "cumulative_reward",
+    "cumulative_regret",
+    "arm_selection_counts",
+    "arm_selection_fractions",
 ]

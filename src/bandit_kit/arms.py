@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Sequence
 
@@ -33,15 +34,21 @@ class Arm:
 
 
 class BernoulliArm(Arm):
-    """An arm whose reward is a Bernoulli(p) sample."""
+    """An arm whose reward is a Bernoulli(p) sample.
 
-    def __init__(self, name: str, p: float) -> None:
+    An optional ``seed`` makes the draws reproducible across calls so
+    experiment harnesses can drive the same arm set from different seedable
+    algorithms without contention.
+    """
+
+    def __init__(self, name: str, p: float, *, seed: int | None = None) -> None:
         if not 0.0 <= p <= 1.0:
             raise ValueError("Bernoulli probability must be in [0, 1]")
+        rng = random.Random(seed)
         super().__init__(
             name=name,
             expected_value=float(p),
-            draw=lambda: 1.0 if _bernoulli_rng(float(p)) else 0.0,
+            draw=lambda: 1.0 if rng.random() < float(p) else 0.0,
             reward_range=(0.0, 1.0),
         )
         self.p = float(p)
@@ -50,28 +57,19 @@ class BernoulliArm(Arm):
 class GaussianArm(Arm):
     """An arm whose reward is a Gaussian(mean, std) sample."""
 
-    def __init__(self, name: str, mean: float, std: float) -> None:
+    def __init__(self, name: str, mean: float, std: float, *, seed: int | None = None) -> None:
         if std <= 0.0:
             raise ValueError("Gaussian std must be positive")
+        rng = random.Random(seed)
         rng_range = (mean - 4.0 * std, mean + 4.0 * std)
         super().__init__(
             name=name,
             expected_value=float(mean),
-            draw=lambda: _gaussian_rng(float(mean), float(std)),
+            draw=lambda: rng.gauss(float(mean), float(std)),
             reward_range=rng_range,
         )
         self.mean = float(mean)
         self.std = float(std)
-
-
-def _bernoulli_rng(p: float) -> bool:
-    import random as _random
-    return _random.random() < p
-
-
-def _gaussian_rng(mean: float, std: float) -> float:
-    import random as _random
-    return _random.gauss(mean, std)
 
 
 def arm_from_spec(spec: str) -> Arm:
