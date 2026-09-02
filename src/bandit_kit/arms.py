@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import random
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Sequence
 
@@ -21,7 +20,7 @@ class Arm:
     name: str
     expected_value: float
     draw: Callable[[], float]
-    reward_range: tuple[float, float] = field(default=(0.0, 1.0))
+    reward_range: tuple[float, float] = (0.0, 1.0)
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -33,11 +32,8 @@ class Arm:
             raise ValueError("reward_range lower bound must not exceed upper bound")
 
 
-@dataclass(frozen=True)
 class BernoulliArm(Arm):
     """An arm whose reward is a Bernoulli(p) sample."""
-
-    p: float
 
     def __init__(self, name: str, p: float) -> None:
         if not 0.0 <= p <= 1.0:
@@ -45,17 +41,14 @@ class BernoulliArm(Arm):
         super().__init__(
             name=name,
             expected_value=float(p),
+            draw=lambda: 1.0 if _bernoulli_rng(float(p)) else 0.0,
             reward_range=(0.0, 1.0),
         )
-        object.__setattr__(self, "p", float(p))
+        self.p = float(p)
 
 
-@dataclass(frozen=True)
 class GaussianArm(Arm):
     """An arm whose reward is a Gaussian(mean, std) sample."""
-
-    mean: float
-    std: float
 
     def __init__(self, name: str, mean: float, std: float) -> None:
         if std <= 0.0:
@@ -64,10 +57,21 @@ class GaussianArm(Arm):
         super().__init__(
             name=name,
             expected_value=float(mean),
+            draw=lambda: _gaussian_rng(float(mean), float(std)),
             reward_range=rng_range,
         )
-        object.__setattr__(self, "mean", float(mean))
-        object.__setattr__(self, "std", float(std))
+        self.mean = float(mean)
+        self.std = float(std)
+
+
+def _bernoulli_rng(p: float) -> bool:
+    import random as _random
+    return _random.random() < p
+
+
+def _gaussian_rng(mean: float, std: float) -> float:
+    import random as _random
+    return _random.gauss(mean, std)
 
 
 def arm_from_spec(spec: str) -> Arm:
