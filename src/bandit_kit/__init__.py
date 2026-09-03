@@ -34,8 +34,10 @@ from .experiment import (
 from .metrics import (
     arm_selection_counts,
     arm_selection_fractions,
+    compare_to_oracle,
     cumulative_regret,
     cumulative_reward,
+    regret_curve,
 )
 from .reporting import render_markdown_report
 
@@ -67,6 +69,8 @@ __all__ = [
     "summarize_runs",
     "cumulative_reward",
     "cumulative_regret",
+    "regret_curve",
+    "compare_to_oracle",
     "arm_selection_counts",
     "arm_selection_fractions",
     "render_markdown_report",

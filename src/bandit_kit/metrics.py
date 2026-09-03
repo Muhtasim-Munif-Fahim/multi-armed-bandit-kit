@@ -71,3 +71,72 @@ __all__ = [
     "arm_selection_counts",
     "arm_selection_fractions",
 ]
+
+
+
+def regret_curve(
+    rewards: Sequence[float],
+    arms: Sequence[Arm],
+    *,
+    selections: Sequence[int] | None = None,
+) -> List[float]:
+    """Return the cumulative regret curve for a series of rewards.
+
+    This is a standalone version of the same logic used by
+    :func:`BanditExperiment.summarize`; it can be applied to the raw
+    rewards + selections captured by an external runner so callers can
+    reuse the formula without spinning up the experiment harness.
+
+    When ``selections`` is provided, the per-step regret is
+    ``oracle_payoff - arm_payoff[arms[selection]]``; otherwise the per-step
+    regret is ``oracle_payoff - reward``.
+    """
+    payoffs = expected_payoffs(arms)
+    oracle = max(payoffs.values())
+    running = 0.0
+    out: List[float] = []
+    if selections is None:
+        for reward in rewards:
+            running += oracle - float(reward)
+            out.append(running)
+        return out
+    for reward, idx in zip(rewards, selections):
+        running += oracle - payoffs[arms[idx].name]
+        out.append(running)
+    return out
+
+
+def compare_to_oracle(
+    arms: Sequence[Arm],
+    selections: Sequence[int],
+) -> Dict[str, object]:
+    """Compare the per-step arm selections against the oracle choice.
+
+    Returns a dict with:
+      - ``oracle_arm``: name of the arm with the highest expected payoff.
+      - ``oracle_payoff``: that arm's expected payoff.
+      - ``pulls``: number of pulls.
+      - ``oracle_pulls``: number of times the oracle arm was pulled.
+      - ``oracle_pull_rate``: fraction of pulls that hit the oracle.
+      - ``average_regret_per_step``: total mean regret (oracle - chosen)
+        divided by the number of pulls.
+    """
+    if len(selections) == 0:
+        raise ValueError("selections must not be empty")
+    payoffs = expected_payoffs(arms)
+    oracle_arm = max(payoffs, key=payoffs.get)
+    oracle_payoff = float(payoffs[oracle_arm])
+    oracle_pulls = sum(1 for idx in selections if arms[idx].name == oracle_arm)
+    total_regret = sum(
+        oracle_payoff - payoffs[arms[idx].name] for idx in selections
+    )
+    return {
+        "oracle_arm": oracle_arm,
+        "oracle_payoff": oracle_payoff,
+        "pulls": len(selections),
+        "oracle_pulls": oracle_pulls,
+        "oracle_pull_rate": round(oracle_pulls / len(selections), 4),
+        "average_regret_per_step": round(total_regret / len(selections), 6),
+    }
+
+
