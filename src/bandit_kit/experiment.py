@@ -11,6 +11,7 @@ from .algorithms import (
     bayesian_ucb,
     decaying_epsilon_greedy,
     epsilon_greedy,
+    gradient_bandit,
     thompson_sampling_bernoulli,
     ucb1,
 )
@@ -23,6 +24,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "thompson": thompson_sampling_bernoulli,
     "bayesian_ucb": bayesian_ucb,
     "decaying_epsilon_greedy": decaying_epsilon_greedy,
+    "gradient_bandit": gradient_bandit,
 }
 
 

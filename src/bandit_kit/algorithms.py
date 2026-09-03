@@ -299,6 +299,62 @@ class DecayingEpsilonGreedy(BanditAlgorithm):
         return self._current_epsilon(step)
 
 
+
+
+class GradientBandit(BanditAlgorithm):
+    """Gradient bandit with a softmax policy and a per-arm learning rate.
+
+    The policy maintains a preference ``H[i]`` per arm and picks arms with
+    probability ``softmax(H)[i]``. After every reward observation the
+    preferences are updated as ``H[i] += alpha * (reward - baseline) * (1 - p[i])``
+    on the chosen arm and ``H[j] -= alpha * (reward - baseline) * p[j]`` on
+    every other arm, where ``baseline`` is the running mean reward
+    (across all arms). ``alpha`` defaults to 0.1 and is configurable.
+    Continuous rewards in any range are accepted.
+    """
+
+    def __init__(self, alpha: float = 0.1, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if alpha <= 0.0:
+            raise ValueError("alpha must be positive")
+        self.alpha = float(alpha)
+        self._preferences: list[float] = []
+        self._all_rewards: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._preferences = [0.0] * len(arms)
+        self._all_rewards = []
+
+    def _softmax(self) -> list[float]:
+        prefs = self._preferences
+        max_pref = max(prefs)
+        exps = [float(p) for p in [pow(2.718281828459045, p - max_pref) for p in prefs]]
+        total = sum(exps)
+        return [value / total for value in exps]
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        probabilities = self._softmax()
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        idx = step.arm_index
+        reward = float(step.reward)
+        self._all_rewards.append(reward)
+        baseline = sum(self._all_rewards) / len(self._all_rewards)
+        probabilities = self._softmax()
+        for j in range(len(arms)):
+            if j == idx:
+                self._preferences[j] += self.alpha * (reward - baseline) * (1 - probabilities[j])
+            else:
+                self._preferences[j] -= self.alpha * (reward - baseline) * probabilities[j]
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -330,6 +386,12 @@ def decaying_epsilon_greedy(
     )
 
 
+
+
+def gradient_bandit(alpha: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
+    return GradientBandit(alpha=alpha, seed=seed)
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -343,4 +405,6 @@ __all__ = [
     "BayesianUCB",
     "decaying_epsilon_greedy",
     "DecayingEpsilonGreedy",
+    "gradient_bandit",
+    "GradientBandit",
 ]
