@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from .arms import arm_from_spec
+from .arms import arm_from_spec, best_arm
 from .algorithms import epsilon_greedy, ucb1, thompson_sampling_bernoulli
 from .experiment import BanditExperiment
 from .reporting import render_markdown_report
@@ -37,7 +37,45 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output", "-o", default=None,
         help="Write the markdown report to a file instead of stdout",
     )
+    _build_best_parser(sub)
     return parser
+
+
+def _build_best_parser(sub):
+    best = sub.add_parser(
+        "best",
+        help="Show the arm with the highest expected payoff (the oracle)",
+    )
+    best.add_argument(
+        "--arms", required=True,
+        help="Comma-separated list of arm specs, e.g. 'bern:0.1,bern:0.2,bern:0.05'",
+    )
+    best.add_argument(
+        "--json", action="store_true",
+        help="Print the result as JSON instead of plain text",
+    )
+
+
+def cmd_best(args: argparse.Namespace) -> int:
+    """Print the oracle arm for the given spec list."""
+    arms = [arm_from_spec(spec) for spec in args.arms.split(",") if spec.strip()]
+    if not arms:
+        print("best: at least one arm spec is required", file=sys.stderr)
+        return 2
+    oracle = best_arm(arms)
+    payload = {
+        "oracle_arm": oracle.name,
+        "oracle_payoff": oracle.expected_value,
+        "arms": [{"name": arm.name, "expected_value": arm.expected_value} for arm in arms],
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"oracle arm: {oracle.name}")
+        print(f"oracle expected payoff: {oracle.expected_value:.4f}")
+        for arm in arms:
+            print(f"  {arm.name}: EV={arm.expected_value:.4f}")
+    return 0
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
@@ -76,5 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "compare":
         return cmd_compare(args)
+    if args.command == "best":
+        return cmd_best(args)
     parser.error(f"unknown command: {args.command}")
     return 2
