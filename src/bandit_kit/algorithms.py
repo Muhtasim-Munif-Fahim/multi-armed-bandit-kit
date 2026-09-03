@@ -233,6 +233,72 @@ class BayesianUCB(BanditAlgorithm):
             self._beta[idx] += 1.0 - reward
 
 
+
+
+class DecayingEpsilonGreedy(BanditAlgorithm):
+    """Epsilon-greedy with an exponential epsilon decay schedule.
+
+    ``epsilon_t = epsilon_min + (epsilon_start - epsilon_min) * decay ** t``
+    so the policy explores broadly at the start of the run and
+    exploits more aggressively as evidence accumulates. ``decay`` is in
+    (0, 1) and ``epsilon_min`` is in [0, 1] with ``epsilon_start`` in
+    (epsilon_min, 1].
+    """
+
+    def __init__(
+        self,
+        epsilon_start: float = 0.5,
+        epsilon_min: float = 0.05,
+        decay: float = 0.99,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if not 0.0 <= epsilon_min < epsilon_start <= 1.0:
+            raise ValueError(
+                "epsilon_min must be in [0, 1) and 0 <= epsilon_min < epsilon_start <= 1"
+            )
+        if not 0.0 < decay < 1.0:
+            raise ValueError("decay must be in (0, 1)")
+        self.epsilon_start = float(epsilon_start)
+        self.epsilon_min = float(epsilon_min)
+        self.decay = float(decay)
+        self._counts: list[int] = []
+        self._values: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._counts = [0] * len(arms)
+        self._values = [0.0] * len(arms)
+
+    def _current_epsilon(self, step: int) -> float:
+        return self.epsilon_min + (self.epsilon_start - self.epsilon_min) * (
+            self.decay ** step
+        )
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if any(c == 0 for c in self._counts):
+            return self._counts.index(0)
+        epsilon = self._current_epsilon(step)
+        if self._rng.random() < epsilon:
+            return self._rng.randrange(len(arms))
+        best = max(self._values)
+        candidates = [idx for idx, value in enumerate(self._values) if value == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        idx = step.arm_index
+        n = self._counts[idx]
+        new_n = n + 1
+        self._values[idx] += (step.reward - self._values[idx]) / new_n
+        self._counts[idx] = new_n
+
+    def epsilon_at(self, step: int) -> float:
+        """Return the epsilon schedule value at ``step`` (0-indexed)."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        return self._current_epsilon(step)
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -247,6 +313,23 @@ def bayesian_ucb(lam: float = 2.0, *, seed: int | None = None) -> BanditAlgorith
     return BayesianUCB(lam=lam, seed=seed)
 
 
+
+
+def decaying_epsilon_greedy(
+    epsilon_start: float = 0.5,
+    epsilon_min: float = 0.05,
+    decay: float = 0.99,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return DecayingEpsilonGreedy(
+        epsilon_start=epsilon_start,
+        epsilon_min=epsilon_min,
+        decay=decay,
+        seed=seed,
+    )
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -258,4 +341,6 @@ __all__ = [
     "thompson_sampling_bernoulli",
     "bayesian_ucb",
     "BayesianUCB",
+    "decaying_epsilon_greedy",
+    "DecayingEpsilonGreedy",
 ]

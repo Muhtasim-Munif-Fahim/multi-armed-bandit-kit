@@ -16,9 +16,9 @@ from bandit_kit import (
 
 def make_arms():
     return [
-        BernoulliArm(name="A", p=0.10),
-        BernoulliArm(name="B", p=0.20),
-        BernoulliArm(name="C", p=0.05),
+        BernoulliArm(name="A", p=0.10, seed=1),
+        BernoulliArm(name="B", p=0.20, seed=2),
+        BernoulliArm(name="C", p=0.05, seed=3),
     ]
 
 
