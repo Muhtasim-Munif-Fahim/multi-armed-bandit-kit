@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Sequence, Tuple
 from .algorithms import (
     BanditAlgorithm,
     BanditStep,
+    bayesian_ucb,
     epsilon_greedy,
     thompson_sampling_bernoulli,
     ucb1,
@@ -19,6 +20,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "epsilon_greedy": epsilon_greedy,
     "ucb1": ucb1,
     "thompson": thompson_sampling_bernoulli,
+    "bayesian_ucb": bayesian_ucb,
 }
 
 

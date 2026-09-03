@@ -178,12 +178,73 @@ def epsilon_greedy(epsilon: float = 0.1, *, seed: int | None = None) -> BanditAl
     return EpsilonGreedy(epsilon=epsilon, seed=seed)
 
 
+
+
+class BayesianUCB(BanditAlgorithm):
+    """Bayesian upper-confidence bound for Bernoulli arms.
+
+    Maintains a Beta(alpha, beta) posterior per Bernoulli arm and picks
+    the arm with the largest ``mu + lambda * sigma`` where ``mu`` and
+    ``sigma`` are the posterior mean and standard deviation. ``lambda``
+    defaults to 2.0 and is configurable per-instance. Non-Bernoulli
+    arms fall back to ``expected_value`` as a fixed mean and a default
+    standard deviation of 1.0 so the algorithm still runs on
+    heterogeneous arm sets.
+    """
+
+    def __init__(self, lam: float = 2.0, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if lam <= 0.0:
+            raise ValueError("lam must be positive")
+        self.lam = float(lam)
+        self._alpha: list[float] = []
+        self._beta: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._alpha = [1.0] * len(arms)
+        self._beta = [1.0] * len(arms)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        scores: list[float] = []
+        for idx, arm in enumerate(arms):
+            if isinstance(arm, BernoulliArm):
+                alpha = self._alpha[idx]
+                beta = self._beta[idx]
+                mean = alpha / (alpha + beta)
+                var = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1.0))
+                sigma = var ** 0.5
+            else:
+                mean = float(arm.expected_value)
+                sigma = 1.0
+            scores.append(mean + self.lam * sigma)
+        best = max(scores)
+        candidates = [idx for idx, value in enumerate(scores) if value == best]
+        return candidates[self._rng.randrange(len(candidates))]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        idx = step.arm_index
+        reward = step.reward
+        if reward >= 1.0:
+            self._alpha[idx] += 1.0
+        elif reward <= 0.0:
+            self._beta[idx] += 1.0
+        else:
+            self._alpha[idx] += reward
+            self._beta[idx] += 1.0 - reward
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
 
 def thompson_sampling_bernoulli(*, seed: int | None = None) -> BanditAlgorithm:
     return ThompsonBernoulli(seed=seed)
+
+
+
+
+def bayesian_ucb(lam: float = 2.0, *, seed: int | None = None) -> BanditAlgorithm:
+    return BayesianUCB(lam=lam, seed=seed)
 
 
 __all__ = [
@@ -195,4 +256,6 @@ __all__ = [
     "epsilon_greedy",
     "ucb1",
     "thompson_sampling_bernoulli",
+    "bayesian_ucb",
+    "BayesianUCB",
 ]
