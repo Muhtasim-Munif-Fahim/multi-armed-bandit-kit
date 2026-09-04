@@ -40,6 +40,13 @@ from .metrics import (
     regret_curve,
 )
 from .reporting import render_markdown_report
+from .visualization import (
+    HAS_MATPLOTLIB,
+    plot_arm_selection,
+    plot_regret_curves,
+    plot_reward_curves,
+    save_all_plots,
+)
 
 __all__ = [
     "Arm",
@@ -74,4 +81,9 @@ __all__ = [
     "arm_selection_counts",
     "arm_selection_fractions",
     "render_markdown_report",
+    "HAS_MATPLOTLIB",
+    "plot_regret_curves",
+    "plot_reward_curves",
+    "plot_arm_selection",
+    "save_all_plots",
 ]
