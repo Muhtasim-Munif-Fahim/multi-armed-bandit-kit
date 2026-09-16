@@ -38,6 +38,8 @@ def render_markdown_report(
     lines.append(f"- Base seed: {experiment.seed}")
     if experiment.algorithms and "epsilon_greedy" in experiment.algorithms:
         lines.append(f"- epsilon (epsilon-greedy): {experiment.epsilon}")
+    if experiment.algorithms and "exp3" in experiment.algorithms:
+        lines.append(f"- gamma (exp3): {experiment.gamma}")
     lines.append("")
 
     lines.append("## Per-algorithm summary")
@@ -88,6 +90,12 @@ def render_markdown_report(
             lines.append(
                 "- thompson sampling maintains a Beta(1, 1) posterior per Bernoulli arm and falls back "
                 "to expected_value for non-Bernoulli arms."
+            )
+        elif algo == "exp3":
+            lines.append(
+                "- exp3 (adversarial bandit) samples from a mixture of the exponential-weight "
+                f"distribution and the uniform distribution (gamma={experiment.gamma}); weights "
+                "are updated with importance-weighted rewards clipped to [0, 1]."
             )
     lines.append("")
     return "\n".join(lines)

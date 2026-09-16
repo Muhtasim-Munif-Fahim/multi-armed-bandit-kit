@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm
-from .algorithms import epsilon_greedy, ucb1, thompson_sampling_bernoulli
+from .algorithms import epsilon_greedy, exp3, ucb1, thompson_sampling_bernoulli
 from .experiment import BanditExperiment
 from .reporting import render_markdown_report
 
@@ -17,6 +17,7 @@ ALGORITHMS = {
     "epsilon_greedy": epsilon_greedy,
     "ucb1": ucb1,
     "thompson": thompson_sampling_bernoulli,
+    "exp3": exp3,
 }
 
 
@@ -32,6 +33,7 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--steps", type=int, default=200, help="Number of pulls per run (default: 200)")
     compare.add_argument("--runs", type=int, default=20, help="Number of independent runs (default: 20)")
     compare.add_argument("--epsilon", type=float, default=0.1, help="epsilon-greedy exploration rate (default: 0.1)")
+    compare.add_argument("--gamma", type=float, default=0.1, help="EXP3 exploration mixing rate (default: 0.1)")
     compare.add_argument("--seed", type=int, default=42, help="Base random seed (default: 42)")
     compare.add_argument(
         "--output", "-o", default=None,
@@ -90,6 +92,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         runs=args.runs,
         seed=args.seed,
         epsilon=args.epsilon,
+        gamma=args.gamma,
     )
     runs = experiment.run()
     summary = experiment.summarize(runs)

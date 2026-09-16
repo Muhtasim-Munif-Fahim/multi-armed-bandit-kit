@@ -30,6 +30,7 @@ def test_available_algorithms_lists_all_three() -> None:
     assert "epsilon_greedy" in algos
     assert "ucb1" in algos
     assert "thompson" in algos
+    assert "exp3" in algos
 
 
 def test_experiment_rejects_empty_arms() -> None:
