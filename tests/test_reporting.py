@@ -45,6 +45,18 @@ def test_report_includes_exp3_notes() -> None:
     assert "adversarial bandit" in report
 
 
+def test_report_includes_linucb_notes() -> None:
+    experiment = BanditExperiment(
+        arms=make_arms(), algorithms=["linucb"], steps=10, runs=2, seed=42, linucb_alpha=0.5
+    )
+    runs = experiment.run()
+    summary = experiment.summarize(runs)
+    report = render_markdown_report(experiment=experiment, runs=runs, summary=summary)
+    assert "linucb" in report
+    assert "LinUCB alpha: 0.5" in report
+    assert "ridge-UCB" in report
+
+
 def test_report_lists_arm_selection_fractions(tmp_path: Path) -> None:
     experiment = BanditExperiment(arms=make_arms(), algorithms=["epsilon_greedy"], steps=15, runs=3, seed=2)
     runs = experiment.run()

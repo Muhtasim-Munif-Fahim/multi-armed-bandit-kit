@@ -65,9 +65,31 @@ def arm_selection_fractions(
     return {name: count / total for name, count in counts.items()}
 
 
+def cumulative_contextual_regret(
+    steps: Sequence,
+    arms: Sequence,
+) -> List[float]:
+    """Return cumulative context-conditional regret from recorded steps.
+
+    Each step must carry a ``context`` vector. Instantaneous regret is
+    ``max_a theta_a · x_t - theta_{a_t} · x_t``.
+    """
+    running = 0.0
+    out: List[float] = []
+    for step in steps:
+        context = getattr(step, "context", None)
+        if context is None:
+            raise ValueError("cumulative_contextual_regret requires context on every step")
+        expected = [arm.expected_given(context) for arm in arms]
+        running += max(expected) - expected[step.arm_index]
+        out.append(running)
+    return out
+
+
 __all__ = [
     "cumulative_reward",
     "cumulative_regret",
+    "cumulative_contextual_regret",
     "arm_selection_counts",
     "arm_selection_fractions",
 ]

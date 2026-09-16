@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -9,7 +9,8 @@ chosen arm.
 Algorithms expose a :class:`BanditStep` value object that captures the
 chosen arm, the observed reward, and the step number so downstream
 metrics can compute cumulative reward and cumulative regret without
-re-scanning every step.
+re-scanning every step. Contextual policies may also store the context
+vector observed at that step.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, List, Sequence
 
+from . import _linalg
 from .arms import Arm, BernoulliArm
 
 
@@ -30,14 +32,15 @@ class BanditStep:
     arm_name: str
     reward: float
     step: int
+    context: tuple[float, ...] | None = None
 
 
 class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
-    :func:`thompson_sampling_bernoulli`, and :func:`exp3` return subclasses
-    of this object.
+    :func:`thompson_sampling_bernoulli`, :func:`exp3`, and :func:`linucb`
+    return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -414,6 +417,115 @@ class Exp3(BanditAlgorithm):
         self._last_probabilities = []
 
 
+class LinUCB(BanditAlgorithm):
+    """Disjoint LinUCB (Li, Chu, Langford, Schapire 2010).
+
+    Each arm maintains its own ridge-regression estimate ``theta_a`` of a
+    linear payoff model ``E[r | x, a] = theta_a · x``. At every step the
+    policy observes a shared context vector ``x`` and picks the arm that
+    maximises
+
+        ``theta_a · x + alpha * sqrt(x^T A_a^{-1} x)``
+
+    where ``A_a = ridge * I + sum x x^T`` over pulls of arm ``a``.
+    ``A^{-1}`` is maintained with Sherman-Morrison rank-1 updates so the
+    implementation stays numpy-free.
+
+    When no context is supplied and ``dimension == 1``, the policy uses
+    the intercept ``[1.0]``. That reduces LinUCB to ridge-UCB on
+    stationary (non-contextual) rewards and lets the existing experiment
+    harness run it without a context stream.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 1.0,
+        dimension: int = 1,
+        ridge: float = 1.0,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if alpha < 0.0:
+            raise ValueError("alpha must be non-negative")
+        if dimension < 1:
+            raise ValueError("dimension must be at least 1")
+        if ridge <= 0.0:
+            raise ValueError("ridge must be positive")
+        self.alpha = float(alpha)
+        self.dimension = int(dimension)
+        self.ridge = float(ridge)
+        self._ainv: List[List[List[float]]] = []
+        self._b: List[List[float]] = []
+        self._last_context: List[float] | None = None
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n_arms = len(arms)
+        scale = 1.0 / self.ridge
+        self._ainv = [_linalg.identity(self.dimension, scale) for _ in range(n_arms)]
+        self._b = [_linalg.zeros(self.dimension) for _ in range(n_arms)]
+        self._last_context = None
+
+    def _coerce_context(self, context: Sequence[float] | None) -> List[float]:
+        if context is None:
+            if self.dimension == 1:
+                return [1.0]
+            if self._last_context is not None:
+                return list(self._last_context)
+            raise ValueError(
+                f"LinUCB requires a context vector of length {self.dimension}"
+            )
+        values = [float(entry) for entry in context]
+        if len(values) != self.dimension:
+            raise ValueError(
+                f"context length {len(values)} does not match dimension {self.dimension}"
+            )
+        return values
+
+    def _score(self, arm_index: int, context: Sequence[float]) -> float:
+        inverse = self._ainv[arm_index]
+        theta = _linalg.matvec(inverse, self._b[arm_index])
+        mean = _linalg.dot(theta, context)
+        variance = _linalg.quadratic_form(inverse, context)
+        if variance < 0.0:
+            variance = 0.0
+        return mean + self.alpha * math.sqrt(variance)
+
+    def select_arm(
+        self,
+        arms: Sequence[Arm],
+        step: int,
+        context: Sequence[float] | None = None,
+    ) -> int:
+        if not self._ainv:
+            self.reset(arms)
+        x = self._coerce_context(context)
+        self._last_context = x
+        scores = [self._score(idx, x) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(
+        self,
+        arms: Sequence[Arm],
+        step: BanditStep,
+        context: Sequence[float] | None = None,
+    ) -> None:
+        if not self._ainv:
+            self.reset(arms)
+        x = self._coerce_context(context)
+        idx = step.arm_index
+        self._ainv[idx] = _linalg.sherman_morrison_update(self._ainv[idx], x)
+        self._b[idx] = _linalg.add_vectors(
+            self._b[idx], _linalg.scale_vector(x, float(step.reward))
+        )
+
+    def theta_hat(self, arm_index: int) -> List[float]:
+        """Return the current ridge-regression weight vector for ``arm_index``."""
+        return _linalg.matvec(self._ainv[arm_index], self._b[arm_index])
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -455,6 +567,16 @@ def exp3(gamma: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
     return Exp3(gamma=gamma, seed=seed)
 
 
+def linucb(
+    alpha: float = 1.0,
+    dimension: int = 1,
+    ridge: float = 1.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return LinUCB(alpha=alpha, dimension=dimension, ridge=ridge, seed=seed)
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -472,4 +594,6 @@ __all__ = [
     "GradientBandit",
     "exp3",
     "Exp3",
+    "linucb",
+    "LinUCB",
 ]
