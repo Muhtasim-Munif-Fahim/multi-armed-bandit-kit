@@ -11,6 +11,7 @@ from .algorithms import (
     bayesian_ucb,
     decaying_epsilon_greedy,
     epsilon_greedy,
+    exp3,
     gradient_bandit,
     thompson_sampling_bernoulli,
     ucb1,
@@ -25,6 +26,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "bayesian_ucb": bayesian_ucb,
     "decaying_epsilon_greedy": decaying_epsilon_greedy,
     "gradient_bandit": gradient_bandit,
+    "exp3": exp3,
 }
 
 
@@ -64,6 +66,7 @@ class BanditExperiment:
     runs: int = 20
     seed: int = 42
     epsilon: float = 0.1
+    gamma: float = 0.1
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -79,11 +82,15 @@ class BanditExperiment:
             raise ValueError("runs must be at least 1")
         if not 0.0 <= self.epsilon <= 1.0:
             raise ValueError("epsilon must be in [0, 1]")
+        if not 0.0 < self.gamma <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
 
     def _make_algorithm(self, name: str, seed: int) -> BanditAlgorithm:
         factory = _REGISTRY[name]
         if name == "epsilon_greedy":
             return factory(epsilon=self.epsilon, seed=seed)
+        if name == "exp3":
+            return factory(gamma=self.gamma, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[Arm]:
@@ -178,6 +185,7 @@ class BanditExperiment:
                 "std_final_regret": _stddev(final_regrets),
                 "mean_arm_selection_fraction": avg_fractions,
                 "epsilon": self.epsilon,
+                "gamma": self.gamma,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
         return summary
@@ -191,6 +199,7 @@ def run_experiment(
     runs: int = 20,
     seed: int = 42,
     epsilon: float = 0.1,
+    gamma: float = 0.1,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -200,6 +209,7 @@ def run_experiment(
         runs=runs,
         seed=seed,
         epsilon=epsilon,
+        gamma=gamma,
     )
     return experiment, experiment.run()
 

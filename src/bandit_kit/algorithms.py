@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -35,8 +35,9 @@ class BanditStep:
 class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
-    The factory functions :func:`epsilon_greedy`, :func:`ucb1`, and
-    :func:`thompson_sampling_bernoulli` return subclasses of this object.
+    The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
+    :func:`thompson_sampling_bernoulli`, and :func:`exp3` return subclasses
+    of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -355,6 +356,64 @@ class GradientBandit(BanditAlgorithm):
                 self._preferences[j] -= self.alpha * (reward - baseline) * probabilities[j]
 
 
+class Exp3(BanditAlgorithm):
+    """EXP3 adversarial bandit (Auer, Cesa-Bianchi, Freund, Schapire).
+
+    Maintains a weight ``w[i]`` per arm and samples arm ``i`` with
+    probability ``(1 - gamma) * w[i] / sum(w) + gamma / K``. After
+    observing a reward the chosen arm's weight is multiplied by
+    ``exp(gamma * (reward / p[i]) / K)`` using the importance-weighted
+    estimate. ``gamma`` in (0, 1] is the exploration mixing rate
+    (default 0.1). Rewards are clipped to [0, 1] so the update stays
+    well-defined for unbounded arm types such as Gaussians.
+    """
+
+    def __init__(self, gamma: float = 0.1, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if not 0.0 < gamma <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
+        self.gamma = float(gamma)
+        self._weights: list[float] = []
+        self._last_probabilities: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._weights = [1.0] * len(arms)
+        self._last_probabilities = []
+
+    def _distribution(self) -> list[float]:
+        n = len(self._weights)
+        total = sum(self._weights)
+        return [
+            (1.0 - self.gamma) * (weight / total) + self.gamma / n
+            for weight in self._weights
+        ]
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        probabilities = self._distribution()
+        self._last_probabilities = probabilities
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        n = len(self._weights)
+        if len(self._last_probabilities) != n:
+            self._last_probabilities = self._distribution()
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        probability = self._last_probabilities[idx]
+        estimated = reward / probability
+        self._weights[idx] *= math.exp(self.gamma * estimated / n)
+        max_weight = max(self._weights)
+        if max_weight > 0.0:
+            self._weights = [weight / max_weight for weight in self._weights]
+        self._last_probabilities = []
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -392,6 +451,10 @@ def gradient_bandit(alpha: float = 0.1, *, seed: int | None = None) -> BanditAlg
     return GradientBandit(alpha=alpha, seed=seed)
 
 
+def exp3(gamma: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
+    return Exp3(gamma=gamma, seed=seed)
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -407,4 +470,6 @@ __all__ = [
     "DecayingEpsilonGreedy",
     "gradient_bandit",
     "GradientBandit",
+    "exp3",
+    "Exp3",
 ]
