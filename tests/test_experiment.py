@@ -25,12 +25,13 @@ def make_arms():
     ]
 
 
-def test_available_algorithms_lists_all_three() -> None:
+def test_available_algorithms_lists_bundled_policies() -> None:
     algos = available_algorithms()
     assert "epsilon_greedy" in algos
     assert "ucb1" in algos
     assert "thompson" in algos
     assert "exp3" in algos
+    assert "linucb" in algos
 
 
 def test_experiment_rejects_empty_arms() -> None:
