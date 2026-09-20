@@ -9,9 +9,11 @@ from bandit_kit import (
     BanditStep,
     BernoulliArm,
     Boltzmann,
+    ContextualBanditExperiment,
     GaussianArm,
     Softmax,
     boltzmann,
+    make_linear_contextual_arms,
     run_experiment,
     softmax,
     summarize_runs,
@@ -256,6 +258,30 @@ def test_experiment_rejects_invalid_temperature() -> None:
         )
     with pytest.raises(ValueError, match="temperature_decay"):
         BanditExperiment(arms=make_arms(), algorithms=["boltzmann"], temperature_decay=1.0)
+
+
+def test_contextual_experiment_runs_boltzmann_as_baseline() -> None:
+    arms = make_linear_contextual_arms(n_arms=3, dimension=2, seed=0)
+    experiment = ContextualBanditExperiment(
+        arms=arms,
+        algorithms=["boltzmann"],
+        steps=15,
+        runs=2,
+        seed=1,
+        temperature_start=0.8,
+        temperature_min=0.1,
+        temperature_decay=0.95,
+    )
+    results = experiment.run()
+    assert experiment.temperature_start == 0.8
+    assert len(results) == 2
+    for result in results:
+        assert result.algorithm == "boltzmann"
+        assert len(result.steps) == 15
+        assert all(step.context is not None for step in result.steps)
+    summary = experiment.summarize(results)
+    assert summary[0]["algorithm"] == "boltzmann"
+    assert summary[0]["temperature_start"] == 0.8
 
 
 def test_same_seed_is_deterministic() -> None:
