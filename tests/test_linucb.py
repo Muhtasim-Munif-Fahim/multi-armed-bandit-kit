@@ -418,5 +418,5 @@ def test_experiment_rejects_invalid_linucb_alpha() -> None:
 
 def test_stationary_policies_still_registered() -> None:
     algos = available_algorithms()
-    for name in ("epsilon_greedy", "ucb1", "thompson", "exp3", "linucb"):
+    for name in ("epsilon_greedy", "ucb1", "thompson", "exp3", "linucb", "boltzmann"):
         assert name in algos

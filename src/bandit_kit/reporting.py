@@ -40,6 +40,16 @@ def render_markdown_report(
         lines.append(f"- epsilon (epsilon-greedy): {experiment.epsilon}")
     if experiment.algorithms and "exp3" in experiment.algorithms:
         lines.append(f"- gamma (exp3): {experiment.gamma}")
+    if experiment.algorithms and (
+        "boltzmann" in experiment.algorithms or "softmax" in experiment.algorithms
+    ):
+        lines.append(
+            f"- temperature start (boltzmann): {experiment.temperature_start}"
+        )
+        lines.append(f"- temperature min (boltzmann): {experiment.temperature_min}")
+        lines.append(
+            f"- temperature decay (boltzmann): {experiment.temperature_decay}"
+        )
     if experiment.algorithms and "linucb" in experiment.algorithms:
         lines.append(
             f"- LinUCB alpha: {experiment.linucb_alpha} (intercept-only ridge-UCB; "
@@ -108,6 +118,14 @@ def render_markdown_report(
                 f"model with exploration bonus alpha={experiment.linucb_alpha}. In the "
                 "stationary harness it uses the intercept context [1.0] (ridge-UCB)."
             )
+        elif algo in ("boltzmann", "softmax"):
+            lines.append(
+                "- boltzmann (softmax) samples arms with probability proportional "
+                "to exp(Q / tau), where Q is the empirical mean reward and tau "
+                f"decays from {experiment.temperature_start} to "
+                f"{experiment.temperature_min} "
+                f"(decay={experiment.temperature_decay})."
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -155,6 +173,14 @@ def render_contextual_markdown_report(
         lines.append(f"- LinUCB ridge: {experiment.linucb_ridge}")
     if "epsilon_greedy" in experiment.algorithms:
         lines.append(f"- epsilon (epsilon-greedy): {experiment.epsilon}")
+    if "boltzmann" in experiment.algorithms or "softmax" in experiment.algorithms:
+        lines.append(
+            f"- temperature start (boltzmann): {experiment.temperature_start}"
+        )
+        lines.append(f"- temperature min (boltzmann): {experiment.temperature_min}")
+        lines.append(
+            f"- temperature decay (boltzmann): {experiment.temperature_decay}"
+        )
     lines.append("")
     lines.append(
         "Regret is context-conditional: at each step the oracle is the arm "
@@ -219,6 +245,11 @@ def render_contextual_markdown_report(
         elif algo == "exp3":
             lines.append(
                 "- exp3 ignores context and uses an adversarial exponential-weights policy."
+            )
+        elif algo in ("boltzmann", "softmax"):
+            lines.append(
+                "- boltzmann (softmax) ignores context and samples from a "
+                "temperature-scaled softmax over empirical mean rewards."
             )
         else:
             lines.append(

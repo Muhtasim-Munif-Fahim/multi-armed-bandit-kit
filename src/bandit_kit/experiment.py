@@ -11,6 +11,7 @@ from .algorithms import (
     BanditStep,
     LinUCB,
     bayesian_ucb,
+    boltzmann,
     decaying_epsilon_greedy,
     epsilon_greedy,
     exp3,
@@ -38,6 +39,8 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "gradient_bandit": gradient_bandit,
     "exp3": exp3,
     "linucb": linucb,
+    "boltzmann": boltzmann,
+    "softmax": boltzmann,
 }
 
 
@@ -80,6 +83,9 @@ class BanditExperiment:
     gamma: float = 0.1
     linucb_alpha: float = 1.0
     linucb_ridge: float = 1.0
+    temperature_start: float = 1.0
+    temperature_min: float = 0.05
+    temperature_decay: float = 0.99
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -101,6 +107,17 @@ class BanditExperiment:
             raise ValueError("linucb_alpha must be non-negative")
         if self.linucb_ridge <= 0.0:
             raise ValueError("linucb_ridge must be positive")
+        self._validate_temperature()
+
+    def _validate_temperature(self) -> None:
+        if self.temperature_start <= 0.0:
+            raise ValueError("temperature_start must be positive")
+        if self.temperature_min < 0.0:
+            raise ValueError("temperature_min must be non-negative")
+        if self.temperature_min > self.temperature_start:
+            raise ValueError("temperature_min must be <= temperature_start")
+        if not 0.0 < self.temperature_decay < 1.0:
+            raise ValueError("temperature_decay must be in (0, 1)")
 
     def _make_algorithm(self, name: str, seed: int) -> BanditAlgorithm:
         factory = _REGISTRY[name]
@@ -114,6 +131,13 @@ class BanditExperiment:
                 alpha=self.linucb_alpha,
                 dimension=1,
                 ridge=self.linucb_ridge,
+                seed=seed,
+            )
+        if name in ("boltzmann", "softmax"):
+            return factory(
+                temperature_start=self.temperature_start,
+                temperature_min=self.temperature_min,
+                decay=self.temperature_decay,
                 seed=seed,
             )
         return factory(seed=seed)
@@ -213,6 +237,9 @@ class BanditExperiment:
                 "gamma": self.gamma,
                 "linucb_alpha": self.linucb_alpha,
                 "linucb_ridge": self.linucb_ridge,
+                "temperature_start": self.temperature_start,
+                "temperature_min": self.temperature_min,
+                "temperature_decay": self.temperature_decay,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
         return summary
@@ -229,6 +256,9 @@ def run_experiment(
     gamma: float = 0.1,
     linucb_alpha: float = 1.0,
     linucb_ridge: float = 1.0,
+    temperature_start: float = 1.0,
+    temperature_min: float = 0.05,
+    temperature_decay: float = 0.99,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -241,6 +271,9 @@ def run_experiment(
         gamma=gamma,
         linucb_alpha=linucb_alpha,
         linucb_ridge=linucb_ridge,
+        temperature_start=temperature_start,
+        temperature_min=temperature_min,
+        temperature_decay=temperature_decay,
     )
     return experiment, experiment.run()
 
@@ -305,6 +338,9 @@ class ContextualBanditExperiment:
     gamma: float = 0.1
     linucb_alpha: float = 1.0
     linucb_ridge: float = 1.0
+    temperature_start: float = 1.0
+    temperature_min: float = 0.05
+    temperature_decay: float = 0.99
     context_intercept: bool = True
 
     def __post_init__(self) -> None:
@@ -330,6 +366,14 @@ class ContextualBanditExperiment:
             raise ValueError("linucb_alpha must be non-negative")
         if self.linucb_ridge <= 0.0:
             raise ValueError("linucb_ridge must be positive")
+        if self.temperature_start <= 0.0:
+            raise ValueError("temperature_start must be positive")
+        if self.temperature_min < 0.0:
+            raise ValueError("temperature_min must be non-negative")
+        if self.temperature_min > self.temperature_start:
+            raise ValueError("temperature_min must be <= temperature_start")
+        if not 0.0 < self.temperature_decay < 1.0:
+            raise ValueError("temperature_decay must be in (0, 1)")
 
     @property
     def dimension(self) -> int:
@@ -346,6 +390,13 @@ class ContextualBanditExperiment:
                 alpha=self.linucb_alpha,
                 dimension=self.dimension,
                 ridge=self.linucb_ridge,
+                seed=seed,
+            )
+        if name in ("boltzmann", "softmax"):
+            return factory(
+                temperature_start=self.temperature_start,
+                temperature_min=self.temperature_min,
+                decay=self.temperature_decay,
                 seed=seed,
             )
         return factory(seed=seed)
@@ -472,6 +523,9 @@ class ContextualBanditExperiment:
                 "mean_arm_selection_fraction": avg_fractions,
                 "linucb_alpha": self.linucb_alpha,
                 "linucb_ridge": self.linucb_ridge,
+                "temperature_start": self.temperature_start,
+                "temperature_min": self.temperature_min,
+                "temperature_decay": self.temperature_decay,
                 "dimension": self.dimension,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
@@ -489,6 +543,9 @@ def run_contextual_experiment(
     gamma: float = 0.1,
     linucb_alpha: float = 1.0,
     linucb_ridge: float = 1.0,
+    temperature_start: float = 1.0,
+    temperature_min: float = 0.05,
+    temperature_decay: float = 0.99,
     context_intercept: bool = True,
 ) -> Tuple[ContextualBanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build a contextual experiment, run it, return both."""
@@ -502,6 +559,9 @@ def run_contextual_experiment(
         gamma=gamma,
         linucb_alpha=linucb_alpha,
         linucb_ridge=linucb_ridge,
+        temperature_start=temperature_start,
+        temperature_min=temperature_min,
+        temperature_decay=temperature_decay,
         context_intercept=context_intercept,
     )
     return experiment, experiment.run()

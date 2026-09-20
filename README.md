@@ -3,11 +3,12 @@
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
 stochastic policies (`epsilon-greedy`, `UCB1`, `Thompson sampling`) plus
-the adversarial-bandit policy `EXP3` and the contextual linear policy
-`LinUCB`, provides seedable synthetic Bernoulli, Gaussian, and linear
-contextual arms, runs a configurable experiment harness, and emits a
-Markdown report comparing cumulative reward, cumulative regret, and
-per-arm selection rates.
+the adversarial-bandit policy `EXP3`, the contextual linear policy
+`LinUCB`, and Boltzmann / softmax exploration with a decaying
+temperature schedule. It provides seedable synthetic Bernoulli,
+Gaussian, and linear contextual arms, runs a configurable experiment
+harness, and emits a Markdown report comparing cumulative reward,
+cumulative regret, and per-arm selection rates.
 
 ## Install
 
@@ -21,8 +22,10 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, Thompson sampling, and EXP3. Tune
-epsilon-greedy with `--epsilon` and EXP3 with `--gamma`. The generated
+`compare` runs epsilon-greedy, UCB1, Thompson sampling, EXP3, and
+Boltzmann / softmax. Tune epsilon-greedy with `--epsilon`, EXP3 with
+`--gamma`, and Boltzmann with `--temperature-start`,
+`--temperature-min`, and `--temperature-decay`. The generated
 `report.md` reports cumulative reward and regret per algorithm, per-arm
 selection fractions, and the seed used so the run can be reproduced
 verbatim.
@@ -44,18 +47,21 @@ of pinning the first feature to `1.0`.
 
 ```python
 from bandit_kit import (
-    BernoulliArm, BanditExperiment, epsilon_greedy, ucb1, thompson_sampling_bernoulli, exp3,
+    BernoulliArm, BanditExperiment, epsilon_greedy, ucb1, thompson_sampling_bernoulli, exp3, boltzmann,
 )
 
 arms = [BernoulliArm(name="A", p=0.10), BernoulliArm(name="B", p=0.20), BernoulliArm(name="C", p=0.05)]
 experiment = BanditExperiment(
     arms=arms,
-    algorithms=["epsilon_greedy", "ucb1", "thompson", "exp3"],
+    algorithms=["epsilon_greedy", "ucb1", "thompson", "exp3", "boltzmann"],
     steps=200,
     runs=20,
     seed=42,
     epsilon=0.1,
     gamma=0.1,
+    temperature_start=1.0,
+    temperature_min=0.05,
+    temperature_decay=0.99,
 )
 runs = experiment.run()
 print(experiment.summarize(runs))
@@ -92,6 +98,42 @@ On a stationary (non-contextual) problem the same policy is available
 as `"linucb"` in `BanditExperiment`. It uses the intercept context
 `[1.0]`, which reduces LinUCB to ridge-UCB and leaves the other
 policies unchanged.
+
+### Boltzmann / softmax exploration
+
+Boltzmann (also called softmax action selection) maintains an empirical
+mean `Q[i]` per arm and samples
+
+```
+P(i) = exp(Q[i] / tau_t) / sum_j exp(Q[j] / tau_t)
+```
+
+The temperature follows an exponential schedule
+
+```
+tau_t = temperature_min + (temperature_start - temperature_min) * decay ** t
+```
+
+High temperature is nearly uniform; as `tau` cools the policy
+concentrates on the empirically best arm. Set `temperature_min` equal
+to `temperature_start` for a constant-temperature policy. The registry
+name is `"boltzmann"`; `"softmax"` is an alias for the same factory.
+
+```python
+from bandit_kit import BanditExperiment, BernoulliArm, boltzmann
+
+arms = [BernoulliArm(name="A", p=0.10), BernoulliArm(name="B", p=0.20)]
+experiment = BanditExperiment(
+    arms=arms,
+    algorithms=["boltzmann"],
+    steps=200,
+    runs=20,
+    seed=42,
+    temperature_start=1.0,
+    temperature_min=0.05,
+    temperature_decay=0.99,
+)
+```
 
 See `examples/run_demo.py` for a complete end-to-end demo and
 `tests/` for the unit-test contract.

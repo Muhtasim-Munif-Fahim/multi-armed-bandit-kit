@@ -32,6 +32,8 @@ def test_available_algorithms_lists_bundled_policies() -> None:
     assert "thompson" in algos
     assert "exp3" in algos
     assert "linucb" in algos
+    assert "boltzmann" in algos
+    assert "softmax" in algos
 
 
 def test_experiment_rejects_empty_arms() -> None:
