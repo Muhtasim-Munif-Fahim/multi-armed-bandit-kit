@@ -45,6 +45,27 @@ def test_report_includes_exp3_notes() -> None:
     assert "adversarial bandit" in report
 
 
+def test_report_includes_boltzmann_notes() -> None:
+    experiment = BanditExperiment(
+        arms=make_arms(),
+        algorithms=["boltzmann"],
+        steps=10,
+        runs=2,
+        seed=42,
+        temperature_start=0.8,
+        temperature_min=0.1,
+        temperature_decay=0.95,
+    )
+    runs = experiment.run()
+    summary = experiment.summarize(runs)
+    report = render_markdown_report(experiment=experiment, runs=runs, summary=summary)
+    assert "boltzmann" in report
+    assert "temperature start (boltzmann): 0.8" in report
+    assert "temperature min (boltzmann): 0.1" in report
+    assert "temperature decay (boltzmann): 0.95" in report
+    assert "softmax" in report
+
+
 def test_report_includes_linucb_notes() -> None:
     experiment = BanditExperiment(
         arms=make_arms(), algorithms=["linucb"], steps=10, runs=2, seed=42, linucb_alpha=0.5
@@ -78,6 +99,7 @@ def test_cli_compare_writes_markdown_report(tmp_path: Path) -> None:
         "--runs", "2",
         "--seed", "1",
         "--gamma", "0.25",
+        "--temperature-start", "0.7",
         "--output", str(destination),
     ])
     assert exit_code == 0
@@ -86,7 +108,23 @@ def test_cli_compare_writes_markdown_report(tmp_path: Path) -> None:
     assert "Multi-armed bandit experiment" in text
     assert "epsilon_greedy" in text
     assert "exp3" in text
+    assert "boltzmann" in text
     assert "gamma (exp3): 0.25" in text
+    assert "temperature start (boltzmann): 0.7" in text
+
+
+def test_cli_compare_rejects_invalid_temperature(tmp_path: Path, capsys) -> None:
+    from bandit_kit.cli import main
+
+    exit_code = main([
+        "compare",
+        "--arms", "bern:0.10,bern:0.20",
+        "--steps", "5",
+        "--runs", "1",
+        "--temperature-start", "0.0",
+    ])
+    assert exit_code == 2
+    assert "temperature_start" in capsys.readouterr().err
 
 
 def test_cli_compare_rejects_empty_arm_list(tmp_path: Path, capsys) -> None:

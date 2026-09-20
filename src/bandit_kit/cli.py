@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import epsilon_greedy, exp3, ucb1, thompson_sampling_bernoulli
+from .algorithms import boltzmann, epsilon_greedy, exp3, ucb1, thompson_sampling_bernoulli
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -18,6 +18,7 @@ ALGORITHMS = {
     "ucb1": ucb1,
     "thompson": thompson_sampling_bernoulli,
     "exp3": exp3,
+    "boltzmann": boltzmann,
 }
 
 
@@ -34,6 +35,24 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--runs", type=int, default=20, help="Number of independent runs (default: 20)")
     compare.add_argument("--epsilon", type=float, default=0.1, help="epsilon-greedy exploration rate (default: 0.1)")
     compare.add_argument("--gamma", type=float, default=0.1, help="EXP3 exploration mixing rate (default: 0.1)")
+    compare.add_argument(
+        "--temperature-start",
+        type=float,
+        default=1.0,
+        help="Boltzmann / softmax initial temperature (default: 1.0)",
+    )
+    compare.add_argument(
+        "--temperature-min",
+        type=float,
+        default=0.05,
+        help="Boltzmann / softmax temperature floor (default: 0.05)",
+    )
+    compare.add_argument(
+        "--temperature-decay",
+        type=float,
+        default=0.99,
+        help="Boltzmann / softmax temperature decay in (0, 1) (default: 0.99)",
+    )
     compare.add_argument("--seed", type=int, default=42, help="Base random seed (default: 42)")
     compare.add_argument(
         "--output", "-o", default=None,
@@ -202,15 +221,22 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if not arms:
         print("compare: at least one arm spec is required", file=sys.stderr)
         return 2
-    experiment = BanditExperiment(
-        arms=arms,
-        algorithms=list(ALGORITHMS.keys()),
-        steps=args.steps,
-        runs=args.runs,
-        seed=args.seed,
-        epsilon=args.epsilon,
-        gamma=args.gamma,
-    )
+    try:
+        experiment = BanditExperiment(
+            arms=arms,
+            algorithms=list(ALGORITHMS.keys()),
+            steps=args.steps,
+            runs=args.runs,
+            seed=args.seed,
+            epsilon=args.epsilon,
+            gamma=args.gamma,
+            temperature_start=args.temperature_start,
+            temperature_min=args.temperature_min,
+            temperature_decay=args.temperature_decay,
+        )
+    except ValueError as exc:
+        print(f"compare: {exc}", file=sys.stderr)
+        return 2
     runs = experiment.run()
     summary = experiment.summarize(runs)
     report = render_markdown_report(

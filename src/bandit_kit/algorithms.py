@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, Boltzmann.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -39,8 +39,8 @@ class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
-    :func:`thompson_sampling_bernoulli`, :func:`exp3`, and :func:`linucb`
-    return subclasses of this object.
+    :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
+    and :func:`boltzmann` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -526,6 +526,109 @@ class LinUCB(BanditAlgorithm):
         return _linalg.matvec(self._ainv[arm_index], self._b[arm_index])
 
 
+class Boltzmann(BanditAlgorithm):
+    """Softmax / Boltzmann exploration with a decaying temperature schedule.
+
+    At step ``t`` the policy samples arm ``i`` with probability
+
+        ``P(i) = exp(Q[i] / tau_t) / sum_j exp(Q[j] / tau_t)``
+
+    where ``Q[i]`` is the empirical mean reward of arm ``i`` and
+
+        ``tau_t = temperature_min + (temperature_start - temperature_min) * decay ** t``
+
+    High temperature is nearly uniform (explore); low temperature
+    concentrates on the empirically best arm (exploit). The first
+    unpulled arms are chosen in index order so every ``Q[i]`` is
+    defined before softmax sampling begins. ``temperature_start`` must
+    be positive; ``temperature_min`` is in ``[0, temperature_start]``
+    and ``decay`` is in ``(0, 1)``. Setting ``temperature_min`` equal
+    to ``temperature_start`` yields a constant-temperature policy.
+    """
+
+    _MIN_TEMPERATURE = 1e-12
+
+    def __init__(
+        self,
+        temperature_start: float = 1.0,
+        temperature_min: float = 0.05,
+        decay: float = 0.99,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if temperature_start <= 0.0:
+            raise ValueError("temperature_start must be positive")
+        if temperature_min < 0.0:
+            raise ValueError("temperature_min must be non-negative")
+        if temperature_min > temperature_start:
+            raise ValueError("temperature_min must be <= temperature_start")
+        if not 0.0 < decay < 1.0:
+            raise ValueError("decay must be in (0, 1)")
+        self.temperature_start = float(temperature_start)
+        self.temperature_min = float(temperature_min)
+        self.decay = float(decay)
+        self._counts: List[int] = []
+        self._values: List[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._counts = [0] * len(arms)
+        self._values = [0.0] * len(arms)
+
+    def _current_temperature(self, step: int) -> float:
+        return self.temperature_min + (self.temperature_start - self.temperature_min) * (
+            self.decay ** step
+        )
+
+    def _softmax_probabilities(self, temperature: float) -> List[float]:
+        values = self._values
+        if not values:
+            return []
+        if temperature <= self._MIN_TEMPERATURE:
+            best = max(values)
+            n_best = sum(1 for value in values if value == best)
+            return [1.0 / n_best if value == best else 0.0 for value in values]
+        scaled = [value / temperature for value in values]
+        max_scaled = max(scaled)
+        exps = [math.exp(score - max_scaled) for score in scaled]
+        total = sum(exps)
+        return [value / total for value in exps]
+
+    def _sample(self, probabilities: Sequence[float]) -> int:
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if any(c == 0 for c in self._counts):
+            return self._counts.index(0)
+        temperature = self._current_temperature(step)
+        return self._sample(self._softmax_probabilities(temperature))
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        idx = step.arm_index
+        n = self._counts[idx]
+        new_n = n + 1
+        self._values[idx] += (step.reward - self._values[idx]) / new_n
+        self._counts[idx] = new_n
+
+    def temperature_at(self, step: int) -> float:
+        """Return the temperature schedule value at ``step`` (0-indexed)."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        return self._current_temperature(step)
+
+    def probabilities_at(self, step: int) -> List[float]:
+        """Return the softmax distribution at ``step`` given current values."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        return self._softmax_probabilities(self._current_temperature(step))
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -577,6 +680,40 @@ def linucb(
     return LinUCB(alpha=alpha, dimension=dimension, ridge=ridge, seed=seed)
 
 
+def boltzmann(
+    temperature_start: float = 1.0,
+    temperature_min: float = 0.05,
+    decay: float = 0.99,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return Boltzmann(
+        temperature_start=temperature_start,
+        temperature_min=temperature_min,
+        decay=decay,
+        seed=seed,
+    )
+
+
+def softmax(
+    temperature_start: float = 1.0,
+    temperature_min: float = 0.05,
+    decay: float = 0.99,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    """Alias for :func:`boltzmann`."""
+    return boltzmann(
+        temperature_start=temperature_start,
+        temperature_min=temperature_min,
+        decay=decay,
+        seed=seed,
+    )
+
+
+Softmax = Boltzmann
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -596,4 +733,8 @@ __all__ = [
     "Exp3",
     "linucb",
     "LinUCB",
+    "boltzmann",
+    "Boltzmann",
+    "softmax",
+    "Softmax",
 ]
