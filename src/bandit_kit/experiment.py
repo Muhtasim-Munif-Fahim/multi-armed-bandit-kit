@@ -16,6 +16,7 @@ from .algorithms import (
     epsilon_greedy,
     exp3,
     gradient_bandit,
+    kl_ucb,
     linucb,
     thompson_sampling_bernoulli,
     ucb1,
@@ -41,6 +42,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "linucb": linucb,
     "boltzmann": boltzmann,
     "softmax": boltzmann,
+    "kl_ucb": kl_ucb,
 }
 
 
@@ -86,6 +88,7 @@ class BanditExperiment:
     temperature_start: float = 1.0
     temperature_min: float = 0.05
     temperature_decay: float = 0.99
+    kl_ucb_c: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -107,6 +110,8 @@ class BanditExperiment:
             raise ValueError("linucb_alpha must be non-negative")
         if self.linucb_ridge <= 0.0:
             raise ValueError("linucb_ridge must be positive")
+        if self.kl_ucb_c < 0.0:
+            raise ValueError("kl_ucb_c must be non-negative")
         self._validate_temperature()
 
     def _validate_temperature(self) -> None:
@@ -140,6 +145,8 @@ class BanditExperiment:
                 decay=self.temperature_decay,
                 seed=seed,
             )
+        if name == "kl_ucb":
+            return factory(c=self.kl_ucb_c, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[Arm]:
@@ -240,6 +247,7 @@ class BanditExperiment:
                 "temperature_start": self.temperature_start,
                 "temperature_min": self.temperature_min,
                 "temperature_decay": self.temperature_decay,
+                "kl_ucb_c": self.kl_ucb_c,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
         return summary
@@ -259,6 +267,7 @@ def run_experiment(
     temperature_start: float = 1.0,
     temperature_min: float = 0.05,
     temperature_decay: float = 0.99,
+    kl_ucb_c: float = 0.0,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -274,6 +283,7 @@ def run_experiment(
         temperature_start=temperature_start,
         temperature_min=temperature_min,
         temperature_decay=temperature_decay,
+        kl_ucb_c=kl_ucb_c,
     )
     return experiment, experiment.run()
 
@@ -341,6 +351,7 @@ class ContextualBanditExperiment:
     temperature_start: float = 1.0
     temperature_min: float = 0.05
     temperature_decay: float = 0.99
+    kl_ucb_c: float = 0.0
     context_intercept: bool = True
 
     def __post_init__(self) -> None:
@@ -374,6 +385,8 @@ class ContextualBanditExperiment:
             raise ValueError("temperature_min must be <= temperature_start")
         if not 0.0 < self.temperature_decay < 1.0:
             raise ValueError("temperature_decay must be in (0, 1)")
+        if self.kl_ucb_c < 0.0:
+            raise ValueError("kl_ucb_c must be non-negative")
 
     @property
     def dimension(self) -> int:
@@ -399,6 +412,8 @@ class ContextualBanditExperiment:
                 decay=self.temperature_decay,
                 seed=seed,
             )
+        if name == "kl_ucb":
+            return factory(c=self.kl_ucb_c, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[LinearContextualArm]:
@@ -526,6 +541,7 @@ class ContextualBanditExperiment:
                 "temperature_start": self.temperature_start,
                 "temperature_min": self.temperature_min,
                 "temperature_decay": self.temperature_decay,
+                "kl_ucb_c": self.kl_ucb_c,
                 "dimension": self.dimension,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
@@ -546,6 +562,7 @@ def run_contextual_experiment(
     temperature_start: float = 1.0,
     temperature_min: float = 0.05,
     temperature_decay: float = 0.99,
+    kl_ucb_c: float = 0.0,
     context_intercept: bool = True,
 ) -> Tuple[ContextualBanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build a contextual experiment, run it, return both."""
@@ -562,6 +579,7 @@ def run_contextual_experiment(
         temperature_start=temperature_start,
         temperature_min=temperature_min,
         temperature_decay=temperature_decay,
+        kl_ucb_c=kl_ucb_c,
         context_intercept=context_intercept,
     )
     return experiment, experiment.run()

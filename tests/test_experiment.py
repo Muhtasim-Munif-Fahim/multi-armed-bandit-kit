@@ -34,6 +34,7 @@ def test_available_algorithms_lists_bundled_policies() -> None:
     assert "linucb" in algos
     assert "boltzmann" in algos
     assert "softmax" in algos
+    assert "kl_ucb" in algos
 
 
 def test_experiment_rejects_empty_arms() -> None:

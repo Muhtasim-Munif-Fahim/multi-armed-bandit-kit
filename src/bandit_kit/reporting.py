@@ -50,6 +50,8 @@ def render_markdown_report(
         lines.append(
             f"- temperature decay (boltzmann): {experiment.temperature_decay}"
         )
+    if experiment.algorithms and "kl_ucb" in experiment.algorithms:
+        lines.append(f"- KL-UCB c: {experiment.kl_ucb_c}")
     if experiment.algorithms and "linucb" in experiment.algorithms:
         lines.append(
             f"- LinUCB alpha: {experiment.linucb_alpha} (intercept-only ridge-UCB; "
@@ -126,6 +128,12 @@ def render_markdown_report(
                 f"{experiment.temperature_min} "
                 f"(decay={experiment.temperature_decay})."
             )
+        elif algo == "kl_ucb":
+            lines.append(
+                "- kl_ucb (Garivier & Cappé) picks the arm with the largest "
+                "Bernoulli KL-UCB index "
+                f"(c={experiment.kl_ucb_c}); rewards outside [0, 1] are clipped."
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -181,6 +189,8 @@ def render_contextual_markdown_report(
         lines.append(
             f"- temperature decay (boltzmann): {experiment.temperature_decay}"
         )
+    if "kl_ucb" in experiment.algorithms:
+        lines.append(f"- KL-UCB c: {experiment.kl_ucb_c}")
     lines.append("")
     lines.append(
         "Regret is context-conditional: at each step the oracle is the arm "
@@ -250,6 +260,11 @@ def render_contextual_markdown_report(
             lines.append(
                 "- boltzmann (softmax) ignores context and samples from a "
                 "temperature-scaled softmax over empirical mean rewards."
+            )
+        elif algo == "kl_ucb":
+            lines.append(
+                "- kl_ucb ignores context and uses a Bernoulli KL-UCB index "
+                "on stationary [0, 1] rewards."
             )
         else:
             lines.append(

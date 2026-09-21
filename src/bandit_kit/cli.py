@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import boltzmann, epsilon_greedy, exp3, ucb1, thompson_sampling_bernoulli
+from .algorithms import boltzmann, epsilon_greedy, exp3, kl_ucb, ucb1, thompson_sampling_bernoulli
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -19,6 +19,7 @@ ALGORITHMS = {
     "thompson": thompson_sampling_bernoulli,
     "exp3": exp3,
     "boltzmann": boltzmann,
+    "kl_ucb": kl_ucb,
 }
 
 
@@ -52,6 +53,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.99,
         help="Boltzmann / softmax temperature decay in (0, 1) (default: 0.99)",
+    )
+    compare.add_argument(
+        "--kl-ucb-c",
+        type=float,
+        default=0.0,
+        help="KL-UCB extra log-log coefficient (default: 0.0; use 3 for the COLT bound)",
     )
     compare.add_argument("--seed", type=int, default=42, help="Base random seed (default: 42)")
     compare.add_argument(
@@ -233,6 +240,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
             temperature_start=args.temperature_start,
             temperature_min=args.temperature_min,
             temperature_decay=args.temperature_decay,
+            kl_ucb_c=args.kl_ucb_c,
         )
     except ValueError as exc:
         print(f"compare: {exc}", file=sys.stderr)
