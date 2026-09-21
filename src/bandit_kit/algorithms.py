@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, Boltzmann.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
-    and :func:`boltzmann` return subclasses of this object.
+    :func:`boltzmann`, and :func:`kl_ucb` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -629,6 +629,138 @@ class Boltzmann(BanditAlgorithm):
         return self._softmax_probabilities(self._current_temperature(step))
 
 
+def _bernoulli_kl(p: float, q: float) -> float:
+    """Return KL(Bernoulli(p) || Bernoulli(q)) in nats.
+
+    ``p`` and ``q`` are assumed to lie in ``[0, 1]``. The divergence is
+    ``+inf`` when ``q`` is on the boundary and ``p`` is not.
+    """
+    if q <= 0.0:
+        return 0.0 if p <= 0.0 else math.inf
+    if q >= 1.0:
+        return 0.0 if p >= 1.0 else math.inf
+    kl = 0.0
+    if p > 0.0:
+        kl += p * math.log(p / q)
+    if p < 1.0:
+        kl += (1.0 - p) * math.log((1.0 - p) / (1.0 - q))
+    return kl
+
+
+def _kl_ucb_threshold(time: int, c: float) -> float:
+    """Return ``log(t) + c log(log(t))`` at 1-indexed time ``t``."""
+    t = max(int(time), 1)
+    log_t = math.log(t)
+    if c == 0.0:
+        return log_t
+    # log(log(t)) is only positive for t > e; floor the inner log at 1
+    # so the extra term stays non-negative on the first few steps.
+    return log_t + c * math.log(max(log_t, 1.0))
+
+
+def _kl_ucb_upper(mu: float, count: int, threshold: float, precision: float) -> float:
+    """Largest ``q`` in ``[mu, 1]`` s.t. ``count * KL(mu, q) <= threshold``."""
+    if count <= 0:
+        return 1.0
+    if mu >= 1.0:
+        return 1.0
+    if threshold <= 0.0:
+        return mu
+    lo = mu
+    hi = 1.0
+    for _ in range(64):
+        if hi - lo <= precision:
+            break
+        mid = (lo + hi) / 2.0
+        if count * _bernoulli_kl(mu, mid) <= threshold:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
+class KLUCB(BanditAlgorithm):
+    """KL-UCB (Garivier & Cappé, COLT 2011) for [0, 1]-bounded rewards.
+
+    After every arm has been pulled once, each step picks the arm with
+    the largest Bernoulli KL-UCB index
+
+        ``sup { q ∈ [μ̂, 1] : N * d(μ̂, q) ≤ log(t) + c log log(t) }``
+
+    where ``d`` is the Bernoulli KL divergence, ``μ̂`` is the empirical
+    mean, ``N`` is the pull count, and ``t = step + 1``. ``c`` defaults
+    to 0 (the empirically common ``log(t)`` threshold); ``c = 3``
+    recovers the theoretically analysed extra ``log log(t)`` term.
+
+    Bernoulli KL-UCB is valid for any reward in [0, 1] by Bernoulli
+    domination. Rewards outside that interval are clipped, matching
+    EXP3, so Gaussian arms still run through the same interface.
+    """
+
+    def __init__(
+        self,
+        c: float = 0.0,
+        precision: float = 1e-6,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if c < 0.0:
+            raise ValueError("c must be non-negative")
+        if precision <= 0.0:
+            raise ValueError("precision must be positive")
+        self.c = float(c)
+        self.precision = float(precision)
+        self._counts: List[int] = []
+        self._values: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._counts = [0] * len(arms)
+        self._values = [0.0] * len(arms)
+        self._round_robin = 0
+
+    def _index(self, arm_index: int, step: int) -> float:
+        count = self._counts[arm_index]
+        if count == 0:
+            return math.inf
+        threshold = _kl_ucb_threshold(step + 1, self.c)
+        return _kl_ucb_upper(
+            self._values[arm_index], count, threshold, self.precision
+        )
+
+    def upper_bound(self, arm_index: int, step: int) -> float:
+        """Return the KL-UCB index of ``arm_index`` at 0-indexed ``step``."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        return self._index(arm_index, step)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self._index(idx, step) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        n = self._counts[idx]
+        new_n = n + 1
+        self._values[idx] += (reward - self._values[idx]) / new_n
+        self._counts[idx] = new_n
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
 
@@ -714,6 +846,15 @@ def softmax(
 Softmax = Boltzmann
 
 
+def kl_ucb(
+    c: float = 0.0,
+    precision: float = 1e-6,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return KLUCB(c=c, precision=precision, seed=seed)
+
+
 __all__ = [
     "BanditAlgorithm",
     "BanditStep",
@@ -737,4 +878,6 @@ __all__ = [
     "Boltzmann",
     "softmax",
     "Softmax",
+    "kl_ucb",
+    "KLUCB",
 ]

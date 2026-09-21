@@ -66,6 +66,18 @@ def test_report_includes_boltzmann_notes() -> None:
     assert "softmax" in report
 
 
+def test_report_includes_kl_ucb_notes() -> None:
+    experiment = BanditExperiment(
+        arms=make_arms(), algorithms=["kl_ucb"], steps=10, runs=2, seed=42, kl_ucb_c=3.0
+    )
+    runs = experiment.run()
+    summary = experiment.summarize(runs)
+    report = render_markdown_report(experiment=experiment, runs=runs, summary=summary)
+    assert "kl_ucb" in report
+    assert "KL-UCB c: 3.0" in report
+    assert "Bernoulli KL-UCB" in report
+
+
 def test_report_includes_linucb_notes() -> None:
     experiment = BanditExperiment(
         arms=make_arms(), algorithms=["linucb"], steps=10, runs=2, seed=42, linucb_alpha=0.5
@@ -109,8 +121,10 @@ def test_cli_compare_writes_markdown_report(tmp_path: Path) -> None:
     assert "epsilon_greedy" in text
     assert "exp3" in text
     assert "boltzmann" in text
+    assert "kl_ucb" in text
     assert "gamma (exp3): 0.25" in text
     assert "temperature start (boltzmann): 0.7" in text
+    assert "KL-UCB c:" in text
 
 
 def test_cli_compare_rejects_invalid_temperature(tmp_path: Path, capsys) -> None:
@@ -125,6 +139,20 @@ def test_cli_compare_rejects_invalid_temperature(tmp_path: Path, capsys) -> None
     ])
     assert exit_code == 2
     assert "temperature_start" in capsys.readouterr().err
+
+
+def test_cli_compare_rejects_invalid_kl_ucb_c(tmp_path: Path, capsys) -> None:
+    from bandit_kit.cli import main
+
+    exit_code = main([
+        "compare",
+        "--arms", "bern:0.10,bern:0.20",
+        "--steps", "5",
+        "--runs", "1",
+        "--kl-ucb-c", "-1",
+    ])
+    assert exit_code == 2
+    assert "kl_ucb_c" in capsys.readouterr().err
 
 
 def test_cli_compare_rejects_empty_arm_list(tmp_path: Path, capsys) -> None:

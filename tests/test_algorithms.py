@@ -78,15 +78,16 @@ def test_ucb1_prefers_high_value_arm_after_warmup() -> None:
     arms = make_arms()
     algo.reset(arms)
     # Warmup: pull each arm once with its expected value.
-    for step, expected in enumerate([0.1, 0.2, 0.05]):
+    payoffs = [0.1, 0.2, 0.05]
+    for step, expected in enumerate(payoffs):
         idx = step
         algo.update(arms, BanditStep(arm_index=idx, arm_name=arms[idx].name, reward=expected, step=step))
-    # Run many more steps; B should be chosen the most.
+    # Subsequent rewards equal the known means so the UCB index is deterministic.
     counts = {0: 1, 1: 1, 2: 1}
     for step in range(3, 50):
         idx = algo.select_arm(arms, step)
         counts[idx] = counts.get(idx, 0) + 1
-        algo.update(arms, BanditStep(arm_index=idx, arm_name=arms[idx].name, reward=arms[idx].draw(), step=step))
+        algo.update(arms, BanditStep(arm_index=idx, arm_name=arms[idx].name, reward=payoffs[idx], step=step))
     assert counts[1] > counts[0]
     assert counts[1] > counts[2]
 

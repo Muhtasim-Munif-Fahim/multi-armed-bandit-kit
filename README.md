@@ -2,10 +2,10 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `Thompson sampling`) plus
-the adversarial-bandit policy `EXP3`, the contextual linear policy
-`LinUCB`, and Boltzmann / softmax exploration with a decaying
-temperature schedule. It provides seedable synthetic Bernoulli,
+stochastic policies (`epsilon-greedy`, `UCB1`, `Thompson sampling`,
+`KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
+linear policy `LinUCB`, and Boltzmann / softmax exploration with a
+decaying temperature schedule. It provides seedable synthetic Bernoulli,
 Gaussian, and linear contextual arms, runs a configurable experiment
 harness, and emits a Markdown report comparing cumulative reward,
 cumulative regret, and per-arm selection rates.
@@ -22,13 +22,13 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, Thompson sampling, EXP3, and
-Boltzmann / softmax. Tune epsilon-greedy with `--epsilon`, EXP3 with
-`--gamma`, and Boltzmann with `--temperature-start`,
-`--temperature-min`, and `--temperature-decay`. The generated
-`report.md` reports cumulative reward and regret per algorithm, per-arm
-selection fractions, and the seed used so the run can be reproduced
-verbatim.
+`compare` runs epsilon-greedy, UCB1, Thompson sampling, EXP3,
+Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
+EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
+`--temperature-min`, and `--temperature-decay`, and KL-UCB with
+`--kl-ucb-c`. The generated `report.md` reports cumulative reward and
+regret per algorithm, per-arm selection fractions, and the seed used so
+the run can be reproduced verbatim.
 
 For **contextual** rewards, `compare-contextual` draws synthetic linear
 contexts and compares disjoint LinUCB to non-contextual baselines:
@@ -47,13 +47,13 @@ of pinning the first feature to `1.0`.
 
 ```python
 from bandit_kit import (
-    BernoulliArm, BanditExperiment, epsilon_greedy, ucb1, thompson_sampling_bernoulli, exp3, boltzmann,
+    BernoulliArm, BanditExperiment, epsilon_greedy, ucb1, thompson_sampling_bernoulli, exp3, boltzmann, kl_ucb,
 )
 
 arms = [BernoulliArm(name="A", p=0.10), BernoulliArm(name="B", p=0.20), BernoulliArm(name="C", p=0.05)]
 experiment = BanditExperiment(
     arms=arms,
-    algorithms=["epsilon_greedy", "ucb1", "thompson", "exp3", "boltzmann"],
+    algorithms=["epsilon_greedy", "ucb1", "thompson", "exp3", "boltzmann", "kl_ucb"],
     steps=200,
     runs=20,
     seed=42,
@@ -62,6 +62,7 @@ experiment = BanditExperiment(
     temperature_start=1.0,
     temperature_min=0.05,
     temperature_decay=0.99,
+    kl_ucb_c=0.0,
 )
 runs = experiment.run()
 print(experiment.summarize(runs))
@@ -132,6 +133,39 @@ experiment = BanditExperiment(
     temperature_start=1.0,
     temperature_min=0.05,
     temperature_decay=0.99,
+)
+```
+
+### KL-UCB
+
+KL-UCB (Garivier & Cappé, COLT 2011) is an index policy for
+`[0, 1]`-bounded rewards. After a one-pull warmup it selects the arm
+with the largest Bernoulli KL upper bound
+
+```
+sup { q in [mu_hat, 1] : N * d(mu_hat, q) <= log(t) + c * log(log(t)) }
+```
+
+where `d` is Bernoulli KL divergence. `c=0` (the default) uses the
+common `log(t)` threshold; `c=3` recovers the extra `log log(t)` term
+from the paper. Rewards outside `[0, 1]` are clipped, matching EXP3.
+
+The kit already ships Beta-Bernoulli Thompson sampling
+(`"thompson"` / `thompson_sampling_bernoulli`) and UCB1 (`"ucb1"`), so
+KL-UCB is the additional bounded-reward UCB variant. The registry name
+is `"kl_ucb"`.
+
+```python
+from bandit_kit import BanditExperiment, BernoulliArm, kl_ucb
+
+arms = [BernoulliArm(name="A", p=0.10), BernoulliArm(name="B", p=0.20)]
+experiment = BanditExperiment(
+    arms=arms,
+    algorithms=["kl_ucb"],
+    steps=200,
+    runs=20,
+    seed=42,
+    kl_ucb_c=0.0,
 )
 ```
 
