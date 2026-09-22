@@ -4,8 +4,9 @@ A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
 stochastic policies (`epsilon-greedy`, `UCB1`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
-linear policy `LinUCB`, and Boltzmann / softmax exploration with a
-decaying temperature schedule. It provides seedable synthetic Bernoulli,
+linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
+Boltzmann / softmax exploration with a decaying temperature schedule.
+It provides seedable synthetic Bernoulli,
 Gaussian, and linear contextual arms, runs a configurable experiment
 harness, and emits a Markdown report comparing cumulative reward,
 cumulative regret, and per-arm selection rates.
@@ -38,10 +39,16 @@ bandit-kit compare-contextual --dim 4 --n-arms 3 --steps 200 --runs 20 --alpha 1
 ```
 
 Tune LinUCB with `--alpha` (exploration bonus) and `--ridge` (ridge
-regulariser). Pass `--algorithms linucb` to run LinUCB alone, or keep
-the default `linucb,ucb1,epsilon_greedy` to show the cost of ignoring
-context. `--no-intercept` samples every coordinate in `[-1, 1]` instead
-of pinning the first feature to `1.0`.
+regulariser, shared with LinTS). Pass `--algorithms linucb` to run
+LinUCB alone, add `lints` to compare linear Thompson sampling
+(`--lints-v` sets the posterior scale), or keep the default
+`linucb,ucb1,epsilon_greedy` to show the cost of ignoring context.
+`--no-intercept` samples every coordinate in `[-1, 1]` instead of
+pinning the first feature to `1.0`.
+
+```bash
+bandit-kit compare-contextual --algorithms lints,linucb,ucb1 --lints-v 1.0 --ridge 1.0 --dim 4 --steps 200 --runs 20
+```
 
 ## Library quick start
 
@@ -99,6 +106,46 @@ On a stationary (non-contextual) problem the same policy is available
 as `"linucb"` in `BanditExperiment`. It uses the intercept context
 `[1.0]`, which reduces LinUCB to ridge-UCB and leaves the other
 policies unchanged.
+
+### LinTS (linear contextual Thompson sampling)
+
+Disjoint linear Thompson sampling (Agrawal & Goyal, 2013) keeps the
+same per-arm Bayesian linear regression posterior as LinUCB. With prior
+`N(0, ridge^{-1} I)` and a unit-variance Gaussian likelihood,
+
+```
+A_a = ridge * I + sum x x^T
+b_a = sum r x
+theta_a ~ N(A_a^{-1} b_a, v^2 A_a^{-1})
+```
+
+and the policy pulls `argmax_a theta_a · x`. `v` is the posterior
+sampling scale: `v = 0` is greedy posterior-mean selection and matches
+LinUCB with `alpha = 0` on the same design matrix. Posterior draws use
+a Cholesky factor of `A^{-1}`, which is maintained with the same
+Sherman-Morrison updates as LinUCB, so the implementation stays
+numpy-free.
+
+The registry name is `"lints"`. On a stationary problem the policy uses
+the intercept context `[1.0]`, the same fallback as LinUCB.
+
+```python
+from bandit_kit import ContextualBanditExperiment, make_linear_contextual_arms
+
+arms = make_linear_contextual_arms(n_arms=3, dimension=4, seed=0)
+experiment = ContextualBanditExperiment(
+    arms=arms,
+    algorithms=["lints", "linucb", "ucb1"],
+    steps=200,
+    runs=20,
+    seed=42,
+    lints_v=1.0,
+    lints_ridge=1.0,
+    linucb_alpha=1.0,
+)
+runs = experiment.run()
+print(experiment.summarize(runs))
+```
 
 ### Boltzmann / softmax exploration
 

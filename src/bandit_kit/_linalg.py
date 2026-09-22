@@ -1,7 +1,8 @@
-"""Tiny dense linear-algebra helpers so LinUCB can stay numpy-free."""
+"""Tiny dense linear-algebra helpers so LinUCB and LinTS can stay numpy-free."""
 
 from __future__ import annotations
 
+import math
 from typing import Sequence
 
 
@@ -90,9 +91,41 @@ def quadratic_form(matrix: Sequence[Sequence[float]], vector: Sequence[float]) -
     return dot(vector, matvec(matrix, vector))
 
 
+def cholesky_lower(matrix: Sequence[Sequence[float]], jitter: float = 1e-12) -> Matrix:
+    """Return a lower-triangular ``L`` such that ``L L^T`` approximates ``matrix``.
+
+    The input is symmetrised first. A non-positive pivot is replaced by
+    ``jitter`` so a nearly singular posterior covariance still yields a
+    finite Gaussian sample.
+    """
+    n = len(matrix)
+    if n < 1 or any(len(row) != n for row in matrix):
+        raise ValueError("Cholesky requires a non-empty square matrix")
+    if jitter <= 0.0:
+        raise ValueError("jitter must be positive")
+    lower: Matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            total = sum(lower[i][k] * lower[j][k] for k in range(j))
+            if i == j:
+                diag = matrix[i][i] - total
+                if diag <= 0.0:
+                    diag = jitter
+                lower[i][j] = math.sqrt(diag)
+            else:
+                off = 0.5 * (matrix[i][j] + matrix[j][i]) - total
+                pivot = lower[j][j]
+                if pivot <= 0.0:
+                    pivot = math.sqrt(jitter)
+                    lower[j][j] = pivot
+                lower[i][j] = off / pivot
+    return lower
+
+
 __all__ = [
     "add_scaled_matrix",
     "add_vectors",
+    "cholesky_lower",
     "copy_vector",
     "dot",
     "identity",

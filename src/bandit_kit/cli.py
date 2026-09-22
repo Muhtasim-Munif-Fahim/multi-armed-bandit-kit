@@ -110,7 +110,7 @@ def cmd_best(args: argparse.Namespace) -> int:
 def _build_contextual_parser(sub) -> None:
     contextual = sub.add_parser(
         "compare-contextual",
-        help="Run LinUCB (and optional baselines) on synthetic linear contexts",
+        help="Run LinUCB, LinTS, and optional baselines on synthetic linear contexts",
     )
     contextual.add_argument(
         "--n-arms",
@@ -133,10 +133,16 @@ def _build_contextual_parser(sub) -> None:
         help="LinUCB exploration parameter (default: 1.0)",
     )
     contextual.add_argument(
+        "--lints-v",
+        type=float,
+        default=1.0,
+        help="LinTS posterior sampling scale (default: 1.0; 0 is greedy posterior mean)",
+    )
+    contextual.add_argument(
         "--ridge",
         type=float,
         default=1.0,
-        help="LinUCB ridge regulariser (default: 1.0)",
+        help="Ridge regulariser for LinUCB and LinTS (default: 1.0)",
     )
     contextual.add_argument(
         "--noise-std",
@@ -189,6 +195,8 @@ def cmd_compare_contextual(args: argparse.Namespace) -> int:
             seed=args.seed,
             linucb_alpha=args.alpha,
             linucb_ridge=args.ridge,
+            lints_v=args.lints_v,
+            lints_ridge=args.ridge,
             context_intercept=intercept,
         )
     except ValueError as exc:
