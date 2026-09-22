@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Sequence, Tuple
 from .algorithms import (
     BanditAlgorithm,
     BanditStep,
+    LinTS,
     LinUCB,
     bayesian_ucb,
     boltzmann,
@@ -17,6 +18,7 @@ from .algorithms import (
     exp3,
     gradient_bandit,
     kl_ucb,
+    lints,
     linucb,
     thompson_sampling_bernoulli,
     ucb1,
@@ -40,6 +42,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "gradient_bandit": gradient_bandit,
     "exp3": exp3,
     "linucb": linucb,
+    "lints": lints,
     "boltzmann": boltzmann,
     "softmax": boltzmann,
     "kl_ucb": kl_ucb,
@@ -89,6 +92,8 @@ class BanditExperiment:
     temperature_min: float = 0.05
     temperature_decay: float = 0.99
     kl_ucb_c: float = 0.0
+    lints_v: float = 1.0
+    lints_ridge: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -112,6 +117,10 @@ class BanditExperiment:
             raise ValueError("linucb_ridge must be positive")
         if self.kl_ucb_c < 0.0:
             raise ValueError("kl_ucb_c must be non-negative")
+        if self.lints_v < 0.0:
+            raise ValueError("lints_v must be non-negative")
+        if self.lints_ridge <= 0.0:
+            raise ValueError("lints_ridge must be positive")
         self._validate_temperature()
 
     def _validate_temperature(self) -> None:
@@ -136,6 +145,14 @@ class BanditExperiment:
                 alpha=self.linucb_alpha,
                 dimension=1,
                 ridge=self.linucb_ridge,
+                seed=seed,
+            )
+        if name == "lints":
+            # Stationary path: intercept-only Gaussian Thompson sampling.
+            return factory(
+                v=self.lints_v,
+                dimension=1,
+                ridge=self.lints_ridge,
                 seed=seed,
             )
         if name in ("boltzmann", "softmax"):
@@ -248,6 +265,8 @@ class BanditExperiment:
                 "temperature_min": self.temperature_min,
                 "temperature_decay": self.temperature_decay,
                 "kl_ucb_c": self.kl_ucb_c,
+                "lints_v": self.lints_v,
+                "lints_ridge": self.lints_ridge,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
         return summary
@@ -268,6 +287,8 @@ def run_experiment(
     temperature_min: float = 0.05,
     temperature_decay: float = 0.99,
     kl_ucb_c: float = 0.0,
+    lints_v: float = 1.0,
+    lints_ridge: float = 1.0,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -284,6 +305,8 @@ def run_experiment(
         temperature_min=temperature_min,
         temperature_decay=temperature_decay,
         kl_ucb_c=kl_ucb_c,
+        lints_v=lints_v,
+        lints_ridge=lints_ridge,
     )
     return experiment, experiment.run()
 
@@ -336,7 +359,8 @@ class ContextualBanditExperiment:
     same context stream within a run, and instantaneous regret is
     ``max_a theta_a · x_t - theta_{a_t} · x_t``. Non-contextual policies
     (epsilon-greedy, UCB1, ...) still run: they ignore the context and
-    treat rewards as stationary, which makes them a baseline for LinUCB.
+    treat rewards as stationary, which makes them a baseline for LinUCB
+    and LinTS.
     """
 
     arms: List[LinearContextualArm]
@@ -352,6 +376,8 @@ class ContextualBanditExperiment:
     temperature_min: float = 0.05
     temperature_decay: float = 0.99
     kl_ucb_c: float = 0.0
+    lints_v: float = 1.0
+    lints_ridge: float = 1.0
     context_intercept: bool = True
 
     def __post_init__(self) -> None:
@@ -387,6 +413,10 @@ class ContextualBanditExperiment:
             raise ValueError("temperature_decay must be in (0, 1)")
         if self.kl_ucb_c < 0.0:
             raise ValueError("kl_ucb_c must be non-negative")
+        if self.lints_v < 0.0:
+            raise ValueError("lints_v must be non-negative")
+        if self.lints_ridge <= 0.0:
+            raise ValueError("lints_ridge must be positive")
 
     @property
     def dimension(self) -> int:
@@ -403,6 +433,13 @@ class ContextualBanditExperiment:
                 alpha=self.linucb_alpha,
                 dimension=self.dimension,
                 ridge=self.linucb_ridge,
+                seed=seed,
+            )
+        if name == "lints":
+            return factory(
+                v=self.lints_v,
+                dimension=self.dimension,
+                ridge=self.lints_ridge,
                 seed=seed,
             )
         if name in ("boltzmann", "softmax"):
@@ -446,7 +483,7 @@ class ContextualBanditExperiment:
         step_index: int,
         context: Sequence[float],
     ) -> int:
-        if isinstance(algo, LinUCB):
+        if isinstance(algo, (LinUCB, LinTS)):
             return algo.select_arm(arms, step_index, context=context)  # type: ignore[arg-type]
         return algo.select_arm(arms, step_index)  # type: ignore[arg-type]
 
@@ -457,7 +494,7 @@ class ContextualBanditExperiment:
         step: BanditStep,
         context: Sequence[float],
     ) -> None:
-        if isinstance(algo, LinUCB):
+        if isinstance(algo, (LinUCB, LinTS)):
             algo.update(arms, step, context=context)  # type: ignore[arg-type]
             return
         algo.update(arms, step)  # type: ignore[arg-type]
@@ -542,6 +579,8 @@ class ContextualBanditExperiment:
                 "temperature_min": self.temperature_min,
                 "temperature_decay": self.temperature_decay,
                 "kl_ucb_c": self.kl_ucb_c,
+                "lints_v": self.lints_v,
+                "lints_ridge": self.lints_ridge,
                 "dimension": self.dimension,
             })
         summary.sort(key=lambda row: float(row["mean_final_regret"]))
@@ -563,6 +602,8 @@ def run_contextual_experiment(
     temperature_min: float = 0.05,
     temperature_decay: float = 0.99,
     kl_ucb_c: float = 0.0,
+    lints_v: float = 1.0,
+    lints_ridge: float = 1.0,
     context_intercept: bool = True,
 ) -> Tuple[ContextualBanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build a contextual experiment, run it, return both."""
@@ -580,6 +621,8 @@ def run_contextual_experiment(
         temperature_min=temperature_min,
         temperature_decay=temperature_decay,
         kl_ucb_c=kl_ucb_c,
+        lints_v=lints_v,
+        lints_ridge=lints_ridge,
         context_intercept=context_intercept,
     )
     return experiment, experiment.run()

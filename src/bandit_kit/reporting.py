@@ -57,6 +57,11 @@ def render_markdown_report(
             f"- LinUCB alpha: {experiment.linucb_alpha} (intercept-only ridge-UCB; "
             f"ridge={experiment.linucb_ridge})"
         )
+    if experiment.algorithms and "lints" in experiment.algorithms:
+        lines.append(
+            f"- LinTS v: {experiment.lints_v} (intercept-only Gaussian Thompson sampling; "
+            f"ridge={experiment.lints_ridge})"
+        )
     lines.append("")
 
     lines.append("## Per-algorithm summary")
@@ -120,6 +125,13 @@ def render_markdown_report(
                 f"model with exploration bonus alpha={experiment.linucb_alpha}. In the "
                 "stationary harness it uses the intercept context [1.0] (ridge-UCB)."
             )
+        elif algo == "lints":
+            lines.append(
+                "- lints (disjoint linear Thompson sampling) draws a Gaussian "
+                "posterior sample of each arm's linear weights and picks the "
+                f"largest predicted reward (v={experiment.lints_v}). In the "
+                "stationary harness it uses the intercept context [1.0]."
+            )
         elif algo in ("boltzmann", "softmax"):
             lines.append(
                 "- boltzmann (softmax) samples arms with probability proportional "
@@ -179,6 +191,9 @@ def render_contextual_markdown_report(
     if "linucb" in experiment.algorithms:
         lines.append(f"- LinUCB alpha: {experiment.linucb_alpha}")
         lines.append(f"- LinUCB ridge: {experiment.linucb_ridge}")
+    if "lints" in experiment.algorithms:
+        lines.append(f"- LinTS v: {experiment.lints_v}")
+        lines.append(f"- LinTS ridge: {experiment.lints_ridge}")
     if "epsilon_greedy" in experiment.algorithms:
         lines.append(f"- epsilon (epsilon-greedy): {experiment.epsilon}")
     if "boltzmann" in experiment.algorithms or "softmax" in experiment.algorithms:
@@ -241,6 +256,13 @@ def render_contextual_markdown_report(
                 "- linucb (disjoint LinUCB) observes the context vector at every "
                 f"step and picks the arm with the largest linear UCB "
                 f"(alpha={experiment.linucb_alpha})."
+            )
+        elif algo == "lints":
+            lines.append(
+                "- lints (disjoint linear Thompson sampling) observes the context "
+                "vector at every step, samples a Gaussian posterior weight vector "
+                f"per arm (v={experiment.lints_v}), and pulls the arm with the "
+                "largest sampled linear score."
             )
         elif algo == "ucb1":
             lines.append(

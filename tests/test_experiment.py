@@ -32,6 +32,7 @@ def test_available_algorithms_lists_bundled_policies() -> None:
     assert "thompson" in algos
     assert "exp3" in algos
     assert "linucb" in algos
+    assert "lints" in algos
     assert "boltzmann" in algos
     assert "softmax" in algos
     assert "kl_ucb" in algos

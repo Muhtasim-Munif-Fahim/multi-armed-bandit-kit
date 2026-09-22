@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
-    :func:`boltzmann`, and :func:`kl_ucb` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, and :func:`kl_ucb` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -526,6 +526,132 @@ class LinUCB(BanditAlgorithm):
         return _linalg.matvec(self._ainv[arm_index], self._b[arm_index])
 
 
+class LinTS(BanditAlgorithm):
+    """Disjoint linear Thompson sampling (Agrawal & Goyal 2013).
+
+    Each arm keeps a Gaussian posterior for a linear payoff
+    ``E[r | x, a] = theta_a · x``. With prior ``N(0, ridge^{-1} I)`` and a
+    unit-variance Gaussian likelihood the posterior after pulls of arm
+    ``a`` is
+
+        ``theta_a | data ~ N(A_a^{-1} b_a, v^2 A_a^{-1})``
+
+    where ``A_a = ridge * I + sum x x^T`` and ``b_a = sum r x``. At every
+    step the policy draws one ``theta_a`` per arm and pulls
+
+        ``argmax_a theta_a · x``.
+
+    ``v`` scales posterior uncertainty. ``v = 0`` is greedy posterior-mean
+    selection and matches LinUCB with ``alpha = 0`` on the same ridge
+    design. ``A^{-1}`` is maintained with Sherman-Morrison rank-1 updates;
+    samples use a Cholesky factor of ``A^{-1}`` so the implementation
+    stays numpy-free.
+
+    When no context is supplied and ``dimension == 1``, the policy uses
+    the intercept ``[1.0]``. That reduces LinTS to one-dimensional
+    Gaussian Thompson sampling and lets the stationary experiment harness
+    run it without a context stream.
+    """
+
+    def __init__(
+        self,
+        v: float = 1.0,
+        dimension: int = 1,
+        ridge: float = 1.0,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if v < 0.0:
+            raise ValueError("v must be non-negative")
+        if dimension < 1:
+            raise ValueError("dimension must be at least 1")
+        if ridge <= 0.0:
+            raise ValueError("ridge must be positive")
+        self.v = float(v)
+        self.dimension = int(dimension)
+        self.ridge = float(ridge)
+        self._ainv: List[List[List[float]]] = []
+        self._b: List[List[float]] = []
+        self._last_context: List[float] | None = None
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n_arms = len(arms)
+        scale = 1.0 / self.ridge
+        self._ainv = [_linalg.identity(self.dimension, scale) for _ in range(n_arms)]
+        self._b = [_linalg.zeros(self.dimension) for _ in range(n_arms)]
+        self._last_context = None
+
+    def _coerce_context(self, context: Sequence[float] | None) -> List[float]:
+        if context is None:
+            if self.dimension == 1:
+                return [1.0]
+            if self._last_context is not None:
+                return list(self._last_context)
+            raise ValueError(
+                f"LinTS requires a context vector of length {self.dimension}"
+            )
+        values = [float(entry) for entry in context]
+        if len(values) != self.dimension:
+            raise ValueError(
+                f"context length {len(values)} does not match dimension {self.dimension}"
+            )
+        return values
+
+    def theta_hat(self, arm_index: int) -> List[float]:
+        """Return the posterior mean weight vector for ``arm_index``."""
+        return _linalg.matvec(self._ainv[arm_index], self._b[arm_index])
+
+    def _draw_theta(self, arm_index: int) -> List[float]:
+        mean = self.theta_hat(arm_index)
+        if self.v == 0.0:
+            return mean
+        factor = _linalg.cholesky_lower(self._ainv[arm_index])
+        noise = [self._rng.gauss(0.0, 1.0) for _ in range(self.dimension)]
+        perturbation = _linalg.matvec(factor, noise)
+        return _linalg.add_vectors(mean, _linalg.scale_vector(perturbation, self.v))
+
+    def sample_theta(self, arm_index: int) -> List[float]:
+        """Draw one posterior sample of the weight vector for ``arm_index``."""
+        if not self._ainv:
+            raise RuntimeError("sample_theta requires reset() before sampling")
+        if arm_index < 0 or arm_index >= len(self._ainv):
+            raise IndexError("arm_index out of range")
+        return self._draw_theta(arm_index)
+
+    def select_arm(
+        self,
+        arms: Sequence[Arm],
+        step: int,
+        context: Sequence[float] | None = None,
+    ) -> int:
+        if not self._ainv:
+            self.reset(arms)
+        x = self._coerce_context(context)
+        self._last_context = x
+        scores = [
+            _linalg.dot(self._draw_theta(idx), x) for idx in range(len(arms))
+        ]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(
+        self,
+        arms: Sequence[Arm],
+        step: BanditStep,
+        context: Sequence[float] | None = None,
+    ) -> None:
+        if not self._ainv:
+            self.reset(arms)
+        x = self._coerce_context(context)
+        idx = step.arm_index
+        self._ainv[idx] = _linalg.sherman_morrison_update(self._ainv[idx], x)
+        self._b[idx] = _linalg.add_vectors(
+            self._b[idx], _linalg.scale_vector(x, float(step.reward))
+        )
+
+
 class Boltzmann(BanditAlgorithm):
     """Softmax / Boltzmann exploration with a decaying temperature schedule.
 
@@ -812,6 +938,16 @@ def linucb(
     return LinUCB(alpha=alpha, dimension=dimension, ridge=ridge, seed=seed)
 
 
+def lints(
+    v: float = 1.0,
+    dimension: int = 1,
+    ridge: float = 1.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return LinTS(v=v, dimension=dimension, ridge=ridge, seed=seed)
+
+
 def boltzmann(
     temperature_start: float = 1.0,
     temperature_min: float = 0.05,
@@ -874,6 +1010,8 @@ __all__ = [
     "Exp3",
     "linucb",
     "LinUCB",
+    "lints",
+    "LinTS",
     "boltzmann",
     "Boltzmann",
     "softmax",

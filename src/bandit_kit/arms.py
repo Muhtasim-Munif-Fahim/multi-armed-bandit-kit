@@ -119,8 +119,8 @@ class LinearContextualArm:
     Unlike :class:`BernoulliArm` / :class:`GaussianArm`, the mean is not
     stationary: callers pass a context vector to :meth:`draw` and
     :meth:`expected_given`. Observation noise is Gaussian with standard
-    deviation ``noise_std`` so the model matches disjoint LinUCB's linear
-    ridge-regression estimator.
+    deviation ``noise_std`` so the model matches the linear
+    ridge-regression estimator used by disjoint LinUCB and LinTS.
     """
 
     def __init__(
