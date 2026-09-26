@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, sliding-window UCB, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
-    :func:`lints`, :func:`boltzmann`, and :func:`kl_ucb` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, and :func:`sliding_window_ucb` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -887,8 +887,93 @@ class KLUCB(BanditAlgorithm):
         self._counts[idx] = new_n
 
 
+
+class SlidingWindowUCB(BanditAlgorithm):
+    """Sliding-window UCB1 (Garivier & Moulines, ALT 2011).
+
+    Only the most recent ``window`` pulls contribute to each arm's empirical
+    mean and count. After every arm has been pulled at least once inside the
+    current window (or globally at the start), each step picks the arm with
+    the largest index
+
+    ``mean_i + sqrt(2 * ln(min(t, window)) / n_i)``
+
+    where ``n_i`` and ``mean_i`` are formed from pulls of arm ``i`` among the
+    last ``window`` steps, and ``t = step + 1``. When ``window`` is larger
+    than the horizon the policy recovers ordinary :class:`UCB1`.
+
+    The sliding window is the usual non-stationary adaptation of UCB1: old
+    rewards fall out of the statistics so the policy can track a changing
+    best arm. The first ``len(arms)`` steps still round-robin through arms
+    that have never been pulled (including cold-start after a window wipe).
+    """
+
+    def __init__(self, window: int = 100, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            raise ValueError("window must be an integer >= 1")
+        self.window = int(window)
+        self._history: List[tuple[int, float]] = []
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._history = []
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._round_robin = 0
+
+    def _rebuild(self) -> None:
+        n = len(self._counts)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        for arm_index, reward in self._history:
+            self._counts[arm_index] += 1
+            self._sums[arm_index] += reward
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        t = min(step + 1, self.window)
+        log_term = 2.0 * math.log(max(t, 1))
+        scores = []
+        for idx in range(len(arms)):
+            count = self._counts[idx]
+            mean = self._sums[idx] / count
+            scores.append(mean + math.sqrt(log_term / count))
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        self._history.append((step.arm_index, float(step.reward)))
+        if len(self._history) > self.window:
+            # Drop the oldest observation and rebuild window statistics.
+            self._history = self._history[-self.window :]
+            self._rebuild()
+        else:
+            idx = step.arm_index
+            self._counts[idx] += 1
+            self._sums[idx] += float(step.reward)
+
+
+
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
     return UCB1(seed=seed)
+
+
+def sliding_window_ucb(window: int = 100, *, seed: int | None = None) -> BanditAlgorithm:
+    return SlidingWindowUCB(window=window, seed=seed)
+
 
 
 def thompson_sampling_bernoulli(*, seed: int | None = None) -> BanditAlgorithm:
@@ -996,9 +1081,11 @@ __all__ = [
     "BanditStep",
     "EpsilonGreedy",
     "UCB1",
+    "SlidingWindowUCB",
     "ThompsonBernoulli",
     "epsilon_greedy",
     "ucb1",
+    "sliding_window_ucb",
     "thompson_sampling_bernoulli",
     "bayesian_ucb",
     "BayesianUCB",

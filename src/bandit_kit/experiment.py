@@ -20,6 +20,7 @@ from .algorithms import (
     kl_ucb,
     lints,
     linucb,
+    sliding_window_ucb,
     thompson_sampling_bernoulli,
     ucb1,
 )
@@ -46,6 +47,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "boltzmann": boltzmann,
     "softmax": boltzmann,
     "kl_ucb": kl_ucb,
+    "sliding_window_ucb": sliding_window_ucb,
 }
 
 
@@ -94,6 +96,7 @@ class BanditExperiment:
     kl_ucb_c: float = 0.0
     lints_v: float = 1.0
     lints_ridge: float = 1.0
+    sliding_window: int = 100
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -121,6 +124,8 @@ class BanditExperiment:
             raise ValueError("lints_v must be non-negative")
         if self.lints_ridge <= 0.0:
             raise ValueError("lints_ridge must be positive")
+        if isinstance(self.sliding_window, bool) or not isinstance(self.sliding_window, int) or self.sliding_window < 1:
+            raise ValueError("sliding_window must be an integer >= 1")
         self._validate_temperature()
 
     def _validate_temperature(self) -> None:
@@ -164,6 +169,8 @@ class BanditExperiment:
             )
         if name == "kl_ucb":
             return factory(c=self.kl_ucb_c, seed=seed)
+        if name == "sliding_window_ucb":
+            return factory(window=self.sliding_window, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[Arm]:
@@ -265,6 +272,7 @@ class BanditExperiment:
                 "temperature_min": self.temperature_min,
                 "temperature_decay": self.temperature_decay,
                 "kl_ucb_c": self.kl_ucb_c,
+                "sliding_window": self.sliding_window,
                 "lints_v": self.lints_v,
                 "lints_ridge": self.lints_ridge,
             })
@@ -289,6 +297,7 @@ def run_experiment(
     kl_ucb_c: float = 0.0,
     lints_v: float = 1.0,
     lints_ridge: float = 1.0,
+    sliding_window: int = 100,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -307,6 +316,7 @@ def run_experiment(
         kl_ucb_c=kl_ucb_c,
         lints_v=lints_v,
         lints_ridge=lints_ridge,
+        sliding_window=sliding_window,
     )
     return experiment, experiment.run()
 
@@ -378,6 +388,7 @@ class ContextualBanditExperiment:
     kl_ucb_c: float = 0.0
     lints_v: float = 1.0
     lints_ridge: float = 1.0
+    sliding_window: int = 100
     context_intercept: bool = True
 
     def __post_init__(self) -> None:
@@ -417,6 +428,8 @@ class ContextualBanditExperiment:
             raise ValueError("lints_v must be non-negative")
         if self.lints_ridge <= 0.0:
             raise ValueError("lints_ridge must be positive")
+        if isinstance(self.sliding_window, bool) or not isinstance(self.sliding_window, int) or self.sliding_window < 1:
+            raise ValueError("sliding_window must be an integer >= 1")
 
     @property
     def dimension(self) -> int:
@@ -451,6 +464,8 @@ class ContextualBanditExperiment:
             )
         if name == "kl_ucb":
             return factory(c=self.kl_ucb_c, seed=seed)
+        if name == "sliding_window_ucb":
+            return factory(window=self.sliding_window, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[LinearContextualArm]:

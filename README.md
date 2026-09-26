@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `sliding-window UCB`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,10 +23,10 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, sliding-window UCB, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
-`--temperature-min`, and `--temperature-decay`, and KL-UCB with
+`--temperature-min`, and `--temperature-decay`, KL-UCB with
 `--kl-ucb-c`. The generated `report.md` reports cumulative reward and
 regret per algorithm, per-arm selection fractions, and the seed used so
 the run can be reproduced verbatim.
@@ -182,6 +182,40 @@ experiment = BanditExperiment(
     temperature_decay=0.99,
 )
 ```
+
+
+### Sliding-window UCB
+
+Sliding-window UCB (Garivier & Moulines, ALT 2011) keeps UCB1's index but
+forms the empirical mean and pull count from only the most recent `window`
+observations. At step `t` the index of arm `i` is
+
+```text
+mean_i + sqrt(2 * ln(min(t, window)) / n_i)
+```
+
+where `n_i` and `mean_i` use pulls of arm `i` inside the last `window`
+steps. When `window` is larger than the horizon the policy recovers
+ordinary UCB1. A short window forgets stale rewards, which helps when the
+best arm changes over time.
+
+```python
+from bandit_kit import sliding_window_ucb, run_experiment
+from bandit_kit.arms import BernoulliArm
+
+arms = [BernoulliArm("a", 0.1), BernoulliArm("b", 0.5), BernoulliArm("c", 0.2)]
+experiment, results = run_experiment(
+    arms,
+    algorithms=["sliding_window_ucb", "ucb1"],
+    steps=500,
+    runs=20,
+    sliding_window=100,
+)
+print(experiment.summarize(results))
+```
+
+Tune the window from the CLI with `--sliding-window` (default 100). The
+registry name is `"sliding_window_ucb"`.
 
 ### KL-UCB
 
