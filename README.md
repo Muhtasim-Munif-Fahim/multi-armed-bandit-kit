@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `sliding-window UCB`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, sliding-window UCB, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -216,6 +216,35 @@ print(experiment.summarize(results))
 
 Tune the window from the CLI with `--sliding-window` (default 100). The
 registry name is `"sliding_window_ucb"`.
+
+
+### UCB-Tuned
+
+UCB-Tuned (Auer, Cesa-Bianchi & Fischer, 2002) is a variance-aware UCB
+index for `[0, 1]`-bounded rewards. After a one-pull warmup it selects
+
+```
+mean_i + sqrt( (ln t / n_i) * min(1/4, V_i) )
+```
+
+with `V_i = s_i^2 + sqrt(2 ln t / n_i)` and `s_i^2` the empirical
+second-moment variance. Arms that look nearly deterministic get a
+smaller bonus than plain UCB1, so the policy can exploit earlier.
+Rewards outside `[0, 1]` are clipped (matching KL-UCB / EXP3). The
+registry name is `"ucb_tuned"`.
+
+```python
+from bandit_kit import BanditExperiment, BernoulliArm, ucb_tuned
+
+arms = [BernoulliArm(name="A", p=0.10), BernoulliArm(name="B", p=0.55)]
+experiment = BanditExperiment(
+    arms=arms,
+    algorithms=["ucb_tuned", "ucb1"],
+    steps=300,
+    runs=20,
+    seed=42,
+)
+```
 
 ### KL-UCB
 

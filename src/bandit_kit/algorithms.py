@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, sliding-window UCB, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -888,6 +888,88 @@ class KLUCB(BanditAlgorithm):
 
 
 
+
+class UCBTuned(BanditAlgorithm):
+    """UCB-Tuned (Auer, Cesa-Bianchi & Fischer, Machine Learning 2002).
+
+    Variance-aware UCB for ``[0, 1]``-bounded rewards. After every arm has
+    been pulled once, each step picks the arm with the largest index
+
+    ``mean_i + sqrt( (ln t / n_i) * min(1/4, V_i) )``
+
+    where ``t = step + 1``, ``n_i`` is the pull count,
+
+    ``V_i = s_i^2 + sqrt(2 ln t / n_i)``,
+
+    and ``s_i^2`` is the empirical second-moment variance
+    ``(sum r^2)/n - mean^2`` (floored at 0). Capping the variance proxy
+    at ``1/4`` recovers the Bernoulli worst case; when an arm looks
+    nearly deterministic the bonus shrinks and the policy exploits
+    faster than plain :class:`UCB1`.
+
+    Rewards outside ``[0, 1]`` are clipped so Gaussian arms still run
+    through the same interface (matching KL-UCB / EXP3).
+    """
+
+    def __init__(self, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._sum_sq: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._sum_sq = [0.0] * n
+        self._round_robin = 0
+
+    def _index(self, arm_index: int, step: int) -> float:
+        count = self._counts[arm_index]
+        if count == 0:
+            return math.inf
+        t = max(step + 1, 1)
+        mean = self._sums[arm_index] / count
+        variance = self._sum_sq[arm_index] / count - mean * mean
+        if variance < 0.0:
+            variance = 0.0
+        log_t = math.log(t)
+        v = variance + math.sqrt(2.0 * log_t / count)
+        bonus = math.sqrt((log_t / count) * min(0.25, v))
+        return mean + bonus
+
+    def upper_bound(self, arm_index: int, step: int) -> float:
+        """Return the UCB-Tuned index of ``arm_index`` at 0-indexed ``step``."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        return self._index(arm_index, step)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self._index(idx, step) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        self._counts[idx] += 1
+        self._sums[idx] += reward
+        self._sum_sq[idx] += reward * reward
+
+
 class SlidingWindowUCB(BanditAlgorithm):
     """Sliding-window UCB1 (Garivier & Moulines, ALT 2011).
 
@@ -965,6 +1047,11 @@ class SlidingWindowUCB(BanditAlgorithm):
             self._counts[idx] += 1
             self._sums[idx] += float(step.reward)
 
+
+
+
+def ucb_tuned(*, seed: int | None = None) -> BanditAlgorithm:
+    return UCBTuned(seed=seed)
 
 
 def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
@@ -1081,10 +1168,12 @@ __all__ = [
     "BanditStep",
     "EpsilonGreedy",
     "UCB1",
+    "UCBTuned",
     "SlidingWindowUCB",
     "ThompsonBernoulli",
     "epsilon_greedy",
     "ucb1",
+    "ucb_tuned",
     "sliding_window_ucb",
     "thompson_sampling_bernoulli",
     "bayesian_ucb",

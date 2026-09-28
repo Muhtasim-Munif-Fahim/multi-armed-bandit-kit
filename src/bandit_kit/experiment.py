@@ -23,6 +23,7 @@ from .algorithms import (
     sliding_window_ucb,
     thompson_sampling_bernoulli,
     ucb1,
+    ucb_tuned,
 )
 from .arms import (
     Arm,
@@ -37,6 +38,7 @@ from .arms import (
 _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "epsilon_greedy": epsilon_greedy,
     "ucb1": ucb1,
+    "ucb_tuned": ucb_tuned,
     "thompson": thompson_sampling_bernoulli,
     "bayesian_ucb": bayesian_ucb,
     "decaying_epsilon_greedy": decaying_epsilon_greedy,
