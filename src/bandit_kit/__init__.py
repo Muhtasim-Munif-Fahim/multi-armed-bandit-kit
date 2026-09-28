@@ -16,6 +16,7 @@ from .algorithms import (
     Softmax,
     ThompsonBernoulli,
     UCB1,
+    UCBTuned,
     bayesian_ucb,
     boltzmann,
     decaying_epsilon_greedy,
@@ -29,6 +30,7 @@ from .algorithms import (
     softmax,
     thompson_sampling_bernoulli,
     ucb1,
+    ucb_tuned,
 )
 from .arms import (
     Arm,
@@ -84,6 +86,7 @@ __all__ = [
     "BanditStep",
     "EpsilonGreedy",
     "UCB1",
+    "UCBTuned",
     "SlidingWindowUCB",
     "ThompsonBernoulli",
     "BayesianUCB",
@@ -97,6 +100,7 @@ __all__ = [
     "KLUCB",
     "epsilon_greedy",
     "ucb1",
+    "ucb_tuned",
     "sliding_window_ucb",
     "thompson_sampling_bernoulli",
     "bayesian_ucb",
