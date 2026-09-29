@@ -20,6 +20,7 @@ from .algorithms import (
     kl_ucb,
     lints,
     linucb,
+    moss,
     sliding_window_ucb,
     thompson_sampling_bernoulli,
     ucb1,
@@ -50,6 +51,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "softmax": boltzmann,
     "kl_ucb": kl_ucb,
     "sliding_window_ucb": sliding_window_ucb,
+    "moss": moss,
 }
 
 
@@ -99,6 +101,7 @@ class BanditExperiment:
     lints_v: float = 1.0
     lints_ridge: float = 1.0
     sliding_window: int = 100
+    moss_horizon: int | None = None
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -128,6 +131,9 @@ class BanditExperiment:
             raise ValueError("lints_ridge must be positive")
         if isinstance(self.sliding_window, bool) or not isinstance(self.sliding_window, int) or self.sliding_window < 1:
             raise ValueError("sliding_window must be an integer >= 1")
+        if self.moss_horizon is not None:
+            if isinstance(self.moss_horizon, bool) or not isinstance(self.moss_horizon, int) or self.moss_horizon < 1:
+                raise ValueError("moss_horizon must be an integer >= 1")
         self._validate_temperature()
 
     def _validate_temperature(self) -> None:
@@ -173,6 +179,9 @@ class BanditExperiment:
             return factory(c=self.kl_ucb_c, seed=seed)
         if name == "sliding_window_ucb":
             return factory(window=self.sliding_window, seed=seed)
+        if name == "moss":
+            horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
+            return factory(horizon=horizon, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[Arm]:
@@ -300,6 +309,7 @@ def run_experiment(
     lints_v: float = 1.0,
     lints_ridge: float = 1.0,
     sliding_window: int = 100,
+    moss_horizon: int | None = None,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -319,6 +329,7 @@ def run_experiment(
         lints_v=lints_v,
         lints_ridge=lints_ridge,
         sliding_window=sliding_window,
+        moss_horizon=moss_horizon,
     )
     return experiment, experiment.run()
 
@@ -391,6 +402,7 @@ class ContextualBanditExperiment:
     lints_v: float = 1.0
     lints_ridge: float = 1.0
     sliding_window: int = 100
+    moss_horizon: int | None = None
     context_intercept: bool = True
 
     def __post_init__(self) -> None:
@@ -468,6 +480,9 @@ class ContextualBanditExperiment:
             return factory(c=self.kl_ucb_c, seed=seed)
         if name == "sliding_window_ucb":
             return factory(window=self.sliding_window, seed=seed)
+        if name == "moss":
+            horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
+            return factory(horizon=horizon, seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[LinearContextualArm]:

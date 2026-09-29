@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `MOSS`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -245,6 +245,36 @@ experiment = BanditExperiment(
     seed=42,
 )
 ```
+
+
+### MOSS
+
+MOSS (Audibert & Bubeck) is a finite-horizon UCB-style policy. After every
+arm has been pulled once it selects
+
+```
+mean_a + sqrt( max(0, log(T / (n_a * K))) / (2 * n_a) )
+```
+
+where `T` is the known horizon and `K` is the number of arms. Arms that
+have already been pulled more than `T/K` times get a zero exploration
+bonus.
+
+```python
+from bandit_kit import moss, run_experiment, BernoulliArm
+
+arms = [BernoulliArm("A", 0.1), BernoulliArm("B", 0.5), BernoulliArm("C", 0.2)]
+experiment, results = run_experiment(
+    arms,
+    algorithms=["moss", "ucb1"],
+    steps=200,
+    runs=20,
+    moss_horizon=200,
+)
+```
+
+Tune the horizon from the CLI with `--moss-horizon` (defaults to `--steps`).
+The registry name is `"moss"`.
 
 ### KL-UCB
 

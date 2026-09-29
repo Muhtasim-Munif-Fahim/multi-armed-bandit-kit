@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
-    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, and :func:`sliding_window_ucb` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, and :func:`moss` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -1050,6 +1050,85 @@ class SlidingWindowUCB(BanditAlgorithm):
 
 
 
+
+class MOSS(BanditAlgorithm):
+    """MOSS — Minimax Optimal Strategy in the Stochastic case (Audibert & Bubeck).
+
+    Finite-horizon UCB-style index. After every arm has been pulled once,
+    each step picks the arm with the largest index
+
+    ``mean_a + sqrt( max(0, log(T / (n_a * K))) / (2 * n_a) )``
+
+    where ``T`` is the known horizon, ``K`` is the number of arms, and
+    ``n_a`` is the pull count of arm ``a``. The ``max(0, ·)`` floors the
+    log term so arms that have already been pulled more than ``T/K`` times
+    receive a zero exploration bonus (pure exploitation).
+
+    Unlike :class:`UCB1`, the log argument shrinks with ``n_a``, which is
+    what makes MOSS minimax-optimal for finite ``T``. Rewards outside
+    ``[0, 1]`` are clipped so Gaussian arms still share the interface.
+    """
+
+    def __init__(self, horizon: int = 200, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
+            raise ValueError("horizon must be an integer >= 1")
+        self.horizon = int(horizon)
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._n_arms = 0
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._n_arms = n
+        self._round_robin = 0
+
+    def _index(self, arm_index: int) -> float:
+        count = self._counts[arm_index]
+        if count == 0:
+            return math.inf
+        mean = self._sums[arm_index] / count
+        k = max(self._n_arms, 1)
+        # log^+(T / (n_a * K))
+        log_arg = self.horizon / (count * k)
+        log_term = math.log(log_arg) if log_arg > 1.0 else 0.0
+        if log_term < 0.0:
+            log_term = 0.0
+        bonus = math.sqrt(log_term / (2.0 * count))
+        return mean + bonus
+
+    def upper_bound(self, arm_index: int) -> float:
+        """Return the MOSS index of ``arm_index`` given the current counts."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        return self._index(arm_index)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self._index(idx) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        self._counts[idx] += 1
+        self._sums[idx] += reward
+
+
+
 def ucb_tuned(*, seed: int | None = None) -> BanditAlgorithm:
     return UCBTuned(seed=seed)
 
@@ -1060,6 +1139,10 @@ def ucb1(*, seed: int | None = None) -> BanditAlgorithm:
 
 def sliding_window_ucb(window: int = 100, *, seed: int | None = None) -> BanditAlgorithm:
     return SlidingWindowUCB(window=window, seed=seed)
+
+
+def moss(horizon: int = 200, *, seed: int | None = None) -> BanditAlgorithm:
+    return MOSS(horizon=horizon, seed=seed)
 
 
 
@@ -1170,11 +1253,13 @@ __all__ = [
     "UCB1",
     "UCBTuned",
     "SlidingWindowUCB",
+    "MOSS",
     "ThompsonBernoulli",
     "epsilon_greedy",
     "ucb1",
     "ucb_tuned",
     "sliding_window_ucb",
+    "moss",
     "thompson_sampling_bernoulli",
     "bayesian_ucb",
     "BayesianUCB",
