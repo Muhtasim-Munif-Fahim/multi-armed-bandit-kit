@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling, EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -39,7 +39,7 @@ class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
-    :func:`thompson_sampling_bernoulli`, :func:`exp3`, :func:`linucb`,
+    :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`linucb`,
     :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, and :func:`moss` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
@@ -1129,6 +1129,101 @@ class MOSS(BanditAlgorithm):
 
 
 
+
+
+class GaussianThompson(BanditAlgorithm):
+    """Thompson sampling for Gaussian arms with known observation noise.
+
+    Maintains a Normal–Normal conjugate posterior for each arm's mean reward.
+    With prior ``N(mu0, tau0^2)`` and known observation std ``sigma``, after
+    observing rewards ``r_1, ..., r_n`` for an arm the posterior is
+
+        ``mu | data ~ N(mu_n, 1 / lambda_n)``
+
+    where ``lambda_n = 1/tau0^2 + n / sigma^2`` and
+    ``mu_n = (mu0 / tau0^2 + sum(r) / sigma^2) / lambda_n``.
+
+    Each step draws one sample from every arm's posterior and pulls the arm
+    with the largest draw. ``sigma`` defaults to 1.0; a weakly informative
+    prior uses ``mu0=0`` and ``tau0=1``. Seed support comes from the base
+    :class:`BanditAlgorithm` RNG.
+    """
+
+    # Alias used by some callers / docs
+    # ThompsonGaussian = set after class definition
+
+    def __init__(
+        self,
+        mu0: float = 0.0,
+        tau0: float = 1.0,
+        sigma: float = 1.0,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if tau0 <= 0.0:
+            raise ValueError("tau0 must be positive")
+        if sigma <= 0.0:
+            raise ValueError("sigma must be positive")
+        self.mu0 = float(mu0)
+        self.tau0 = float(tau0)
+        self.sigma = float(sigma)
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._prior_precision = 1.0 / (self.tau0 * self.tau0)
+        self._obs_precision = 1.0 / (self.sigma * self.sigma)
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+
+    def posterior_mean(self, arm_index: int) -> float:
+        """Return the current posterior mean for ``arm_index``."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        n = self._counts[arm_index]
+        precision = self._prior_precision + n * self._obs_precision
+        return (self._prior_precision * self.mu0 + self._sums[arm_index] * self._obs_precision) / precision
+
+    def posterior_variance(self, arm_index: int) -> float:
+        """Return the current posterior variance for ``arm_index``."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        n = self._counts[arm_index]
+        precision = self._prior_precision + n * self._obs_precision
+        return 1.0 / precision
+
+    def posterior_precision(self, arm_index: int) -> float:
+        """Return the current posterior precision for ``arm_index``."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        n = self._counts[arm_index]
+        return self._prior_precision + n * self._obs_precision
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        samples: List[float] = []
+        for idx in range(len(arms)):
+            mean = self.posterior_mean(idx)
+            var = self.posterior_variance(idx)
+            samples.append(self._rng.gauss(mean, math.sqrt(var)))
+        best = max(samples)
+        candidates = [idx for idx, value in enumerate(samples) if value == best]
+        return candidates[self._rng.randrange(len(candidates))]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        self._counts[idx] += 1
+        self._sums[idx] += float(step.reward)
+
+
+ThompsonGaussian = GaussianThompson
+
+
 def ucb_tuned(*, seed: int | None = None) -> BanditAlgorithm:
     return UCBTuned(seed=seed)
 
@@ -1148,6 +1243,29 @@ def moss(horizon: int = 200, *, seed: int | None = None) -> BanditAlgorithm:
 
 def thompson_sampling_bernoulli(*, seed: int | None = None) -> BanditAlgorithm:
     return ThompsonBernoulli(seed=seed)
+
+
+def thompson_sampling_gaussian(
+    mu0: float = 0.0,
+    tau0: float = 1.0,
+    sigma: float = 1.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return GaussianThompson(mu0=mu0, tau0=tau0, sigma=sigma, seed=seed)
+
+
+def thompson_gaussian(
+    mu0: float = 0.0,
+    tau0: float = 1.0,
+    sigma: float = 1.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    """Alias for :func:`thompson_sampling_gaussian`."""
+    return thompson_sampling_gaussian(mu0=mu0, tau0=tau0, sigma=sigma, seed=seed)
+
+
 
 
 
@@ -1255,12 +1373,16 @@ __all__ = [
     "SlidingWindowUCB",
     "MOSS",
     "ThompsonBernoulli",
+    "GaussianThompson",
+    "ThompsonGaussian",
     "epsilon_greedy",
     "ucb1",
     "ucb_tuned",
     "sliding_window_ucb",
     "moss",
     "thompson_sampling_bernoulli",
+    "thompson_sampling_gaussian",
+    "thompson_gaussian",
     "bayesian_ucb",
     "BayesianUCB",
     "decaying_epsilon_greedy",
