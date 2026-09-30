@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import boltzmann, epsilon_greedy, exp3, kl_ucb, moss, sliding_window_ucb, ucb1, ucb_tuned, thompson_sampling_bernoulli
+from .algorithms import boltzmann, epsilon_greedy, exp3, kl_ucb, moss, sliding_window_ucb, ucb1, ucb_tuned, thompson_sampling_bernoulli, thompson_sampling_gaussian
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -18,6 +18,7 @@ ALGORITHMS = {
     "ucb1": ucb1,
     "ucb_tuned": ucb_tuned,
     "thompson": thompson_sampling_bernoulli,
+    "thompson_gaussian": thompson_sampling_gaussian,
     "exp3": exp3,
     "boltzmann": boltzmann,
     "kl_ucb": kl_ucb,

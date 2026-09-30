@@ -23,6 +23,7 @@ from .algorithms import (
     moss,
     sliding_window_ucb,
     thompson_sampling_bernoulli,
+    thompson_sampling_gaussian,
     ucb1,
     ucb_tuned,
 )
@@ -41,6 +42,8 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "ucb1": ucb1,
     "ucb_tuned": ucb_tuned,
     "thompson": thompson_sampling_bernoulli,
+    "thompson_gaussian": thompson_sampling_gaussian,
+    "gaussian_thompson": thompson_sampling_gaussian,
     "bayesian_ucb": bayesian_ucb,
     "decaying_epsilon_greedy": decaying_epsilon_greedy,
     "gradient_bandit": gradient_bandit,
@@ -102,6 +105,9 @@ class BanditExperiment:
     lints_ridge: float = 1.0
     sliding_window: int = 100
     moss_horizon: int | None = None
+    thompson_gaussian_mu0: float = 0.0
+    thompson_gaussian_tau0: float = 1.0
+    thompson_gaussian_sigma: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.arms:
@@ -134,6 +140,10 @@ class BanditExperiment:
         if self.moss_horizon is not None:
             if isinstance(self.moss_horizon, bool) or not isinstance(self.moss_horizon, int) or self.moss_horizon < 1:
                 raise ValueError("moss_horizon must be an integer >= 1")
+        if self.thompson_gaussian_tau0 <= 0.0:
+            raise ValueError("thompson_gaussian_tau0 must be positive")
+        if self.thompson_gaussian_sigma <= 0.0:
+            raise ValueError("thompson_gaussian_sigma must be positive")
         self._validate_temperature()
 
     def _validate_temperature(self) -> None:
@@ -182,6 +192,13 @@ class BanditExperiment:
         if name == "moss":
             horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
             return factory(horizon=horizon, seed=seed)
+        if name in ("thompson_gaussian", "gaussian_thompson"):
+            return factory(
+                mu0=self.thompson_gaussian_mu0,
+                tau0=self.thompson_gaussian_tau0,
+                sigma=self.thompson_gaussian_sigma,
+                seed=seed,
+            )
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[Arm]:
@@ -310,6 +327,9 @@ def run_experiment(
     lints_ridge: float = 1.0,
     sliding_window: int = 100,
     moss_horizon: int | None = None,
+    thompson_gaussian_mu0: float = 0.0,
+    thompson_gaussian_tau0: float = 1.0,
+    thompson_gaussian_sigma: float = 1.0,
 ) -> Tuple[BanditExperiment, List[BanditRunResult]]:
     """Convenience constructor: build an experiment, run it, return both."""
     experiment = BanditExperiment(
@@ -330,6 +350,9 @@ def run_experiment(
         lints_ridge=lints_ridge,
         sliding_window=sliding_window,
         moss_horizon=moss_horizon,
+        thompson_gaussian_mu0=thompson_gaussian_mu0,
+        thompson_gaussian_tau0=thompson_gaussian_tau0,
+        thompson_gaussian_sigma=thompson_gaussian_sigma,
     )
     return experiment, experiment.run()
 
@@ -483,6 +506,8 @@ class ContextualBanditExperiment:
         if name == "moss":
             horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
             return factory(horizon=horizon, seed=seed)
+        if name in ("thompson_gaussian", "gaussian_thompson"):
+            return factory(seed=seed)
         return factory(seed=seed)
 
     def _seeded_arms(self, seed: int) -> List[LinearContextualArm]:
