@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `MOSS`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `DiscountedUCB`, `MOSS`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, MOSS, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -216,6 +216,42 @@ print(experiment.summarize(results))
 
 Tune the window from the CLI with `--sliding-window` (default 100). The
 registry name is `"sliding_window_ucb"`.
+
+
+### Discounted UCB
+
+Discounted UCB (Garivier & Moulines, ALT 2011) keeps UCB1's index but
+applies an exponential discount `γ ∈ (0, 1]` to every past count and
+reward. At step `t` the index of arm `i` is
+
+```text
+mean_i + sqrt(2 * ln(t) / N_i(γ))
+```
+
+where `N_i(γ)` and `mean_i` are formed from the discounted history. After
+every update all statistics are multiplied by `γ` before the newest
+observation is added. When `γ = 1` the policy recovers ordinary UCB1;
+smaller `γ` forgets faster and tracks a changing best arm. The other
+Garivier & Moulines non-stationary variant in this kit is sliding-window
+UCB.
+
+```python
+from bandit_kit import discounted_ucb, run_experiment
+from bandit_kit.arms import BernoulliArm
+
+arms = [BernoulliArm("a", 0.1), BernoulliArm("b", 0.5), BernoulliArm("c", 0.2)]
+experiment, results = run_experiment(
+    arms,
+    algorithms=["discounted_ucb", "ucb1"],
+    steps=500,
+    runs=20,
+    discount_gamma=0.9,
+)
+print(experiment.summarize(results))
+```
+
+Tune the discount from the CLI with `--discount-gamma` (default 0.9). The
+registry name is `"discounted_ucb"`.
 
 
 ### UCB-Tuned

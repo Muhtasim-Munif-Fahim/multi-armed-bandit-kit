@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import boltzmann, epsilon_greedy, exp3, kl_ucb, moss, sliding_window_ucb, ucb1, ucb_tuned, thompson_sampling_bernoulli, thompson_sampling_gaussian
+from .algorithms import boltzmann, discounted_ucb, epsilon_greedy, exp3, kl_ucb, moss, sliding_window_ucb, ucb1, ucb_tuned, thompson_sampling_bernoulli, thompson_sampling_gaussian
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -23,6 +23,7 @@ ALGORITHMS = {
     "boltzmann": boltzmann,
     "kl_ucb": kl_ucb,
     "sliding_window_ucb": sliding_window_ucb,
+    "discounted_ucb": discounted_ucb,
     "moss": moss,
 }
 
@@ -69,6 +70,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help="Sliding-window UCB recent-pull window (default: 100)",
+    )
+    compare.add_argument(
+        "--discount-gamma",
+        type=float,
+        default=0.9,
+        help="DiscountedUCB exponential discount γ in (0, 1] (default: 0.9)",
     )
     compare.add_argument(
         "--moss-horizon",
@@ -266,6 +273,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
             temperature_decay=args.temperature_decay,
             kl_ucb_c=args.kl_ucb_c,
             sliding_window=args.sliding_window,
+            discount_gamma=args.discount_gamma,
             moss_horizon=args.moss_horizon,
         )
     except ValueError as exc:

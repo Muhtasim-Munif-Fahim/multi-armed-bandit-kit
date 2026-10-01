@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`linucb`,
-    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, and :func:`moss` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`discounted_ucb`, and :func:`moss` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -1051,6 +1051,75 @@ class SlidingWindowUCB(BanditAlgorithm):
 
 
 
+
+
+
+class DiscountedUCB(BanditAlgorithm):
+    """Discounted UCB for non-stationary bandits (Garivier & Moulines).
+
+    Maintains exponentially discounted pull counts and reward sums. After
+    every arm has been pulled at least once, each step picks the arm with
+    the largest index
+
+    ``mean_i + sqrt(2 * ln(t) / N_i(γ))``
+
+    where ``t = step + 1``, ``N_i(γ)`` is the discounted count of arm ``i``,
+    and ``mean_i`` is the discounted reward sum divided by ``N_i(γ)``. On
+    every update all counts and sums are multiplied by ``γ ∈ (0, 1]`` before
+    the newest observation is added, so older rewards fade smoothly.
+
+    When ``γ = 1`` the statistics are never discounted and the policy
+    recovers ordinary :class:`UCB1`. Smaller ``γ`` forgets faster, which
+    helps when the best arm changes over time. Alongside
+    :class:`SlidingWindowUCB` this is the other classic Garivier & Moulines
+    (ALT 2011) adaptation of UCB1 to non-stationary environments.
+    """
+
+    def __init__(self, gamma: float = 0.9, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if not 0.0 < float(gamma) <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
+        self.gamma = float(gamma)
+        self._disc_counts: List[float] = []
+        self._disc_sums: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._disc_counts = [0.0] * n
+        self._disc_sums = [0.0] * n
+        self._round_robin = 0
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._disc_counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._disc_counts) if count <= 0.0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        log_term = 2.0 * math.log(max(step + 1, 1))
+        scores = []
+        for idx in range(len(arms)):
+            count = self._disc_counts[idx]
+            mean = self._disc_sums[idx] / count
+            scores.append(mean + math.sqrt(log_term / count))
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._disc_counts:
+            self.reset(arms)
+        g = self.gamma
+        for idx in range(len(self._disc_counts)):
+            self._disc_counts[idx] *= g
+            self._disc_sums[idx] *= g
+        arm_idx = step.arm_index
+        self._disc_counts[arm_idx] += 1.0
+        self._disc_sums[arm_idx] += float(step.reward)
+
+
 class MOSS(BanditAlgorithm):
     """MOSS — Minimax Optimal Strategy in the Stochastic case (Audibert & Bubeck).
 
@@ -1236,6 +1305,13 @@ def sliding_window_ucb(window: int = 100, *, seed: int | None = None) -> BanditA
     return SlidingWindowUCB(window=window, seed=seed)
 
 
+
+def discounted_ucb(gamma: float = 0.9, *, seed: int | None = None) -> BanditAlgorithm:
+    return DiscountedUCB(gamma=gamma, seed=seed)
+
+
+
+
 def moss(horizon: int = 200, *, seed: int | None = None) -> BanditAlgorithm:
     return MOSS(horizon=horizon, seed=seed)
 
@@ -1371,6 +1447,7 @@ __all__ = [
     "UCB1",
     "UCBTuned",
     "SlidingWindowUCB",
+    "DiscountedUCB",
     "MOSS",
     "ThompsonBernoulli",
     "GaussianThompson",
@@ -1379,6 +1456,7 @@ __all__ = [
     "ucb1",
     "ucb_tuned",
     "sliding_window_ucb",
+    "discounted_ucb",
     "moss",
     "thompson_sampling_bernoulli",
     "thompson_sampling_gaussian",
