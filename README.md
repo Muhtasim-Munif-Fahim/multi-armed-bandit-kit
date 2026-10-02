@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `DiscountedUCB`, `MOSS`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `DiscountedUCB`, `UCB-V`, `MOSS`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, MOSS, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, MOSS, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -252,6 +252,39 @@ print(experiment.summarize(results))
 
 Tune the discount from the CLI with `--discount-gamma` (default 0.9). The
 registry name is `"discounted_ucb"`.
+
+
+### UCB-V
+
+UCB-V (Audibert, Munos & Szepesvári) is a variance-aware UCB that tracks
+per-arm second moments. After a one-pull warmup it selects
+
+```text
+mean_i + sqrt(2 * V_i * ln(t) / n_i) + c * ln(t) / n_i
+```
+
+where `V_i` is the empirical variance from the running sum of squares
+and `c` is an additive exploration constant (default `3`, matching the
+classic `[0, 1]` bound). Low-variance arms shrink the exploration bonus
+faster than plain UCB1. Rewards outside `[0, 1]` are clipped (matching
+UCB-Tuned / KL-UCB). The registry name is `"ucb_v"`.
+
+```python
+from bandit_kit import ucb_v, run_experiment
+from bandit_kit.arms import BernoulliArm
+
+arms = [BernoulliArm("a", 0.1), BernoulliArm("b", 0.5), BernoulliArm("c", 0.2)]
+experiment, results = run_experiment(
+    arms,
+    algorithms=["ucb_v", "ucb1"],
+    steps=500,
+    runs=20,
+    ucb_v_c=3.0,
+)
+print(experiment.summarize(results))
+```
+
+Tune the additive constant from the CLI with `--ucb-v-c` (default 3.0).
 
 
 ### UCB-Tuned

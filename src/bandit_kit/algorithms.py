@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -1293,6 +1293,89 @@ class GaussianThompson(BanditAlgorithm):
 ThompsonGaussian = GaussianThompson
 
 
+
+class UCBV(BanditAlgorithm):
+    """UCB-V: variance-aware UCB (Audibert, Munos & Szepesvári).
+
+    Tracks per-arm first and second moments. After every arm has been
+    pulled once, each step picks the arm with the largest index
+
+    ``mean_i + sqrt(2 * V_i * ln(t) / n_i) + c * ln(t) / n_i``
+
+    where ``t = step + 1``, ``n_i`` is the pull count, ``V_i`` is the
+    empirical variance ``(sum r^2)/n - mean^2`` (floored at 0), and
+    ``c >= 0`` is the additive exploration constant from Audibert et al.
+    (default ``c = 3``, matching the classic bound for ``[0, 1]`` rewards
+    with range bound ``b = 1``).
+
+    Compared with :class:`UCBTuned`, UCB-V uses the Audibert exploration
+    bonus (variance term plus an explicit ``c log(t)/n`` remainder)
+    rather than the ``min(1/4, V)`` Bernoulli proxy. Rewards outside
+    ``[0, 1]`` are clipped so Gaussian arms still run through the same
+    interface (matching UCB-Tuned / KL-UCB / EXP3).
+    """
+
+    def __init__(self, c: float = 3.0, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(c, bool) or not isinstance(c, (int, float)) or float(c) < 0.0:
+            raise ValueError("c must be a non-negative number")
+        self.c = float(c)
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._sum_sq: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._sum_sq = [0.0] * n
+        self._round_robin = 0
+
+    def _index(self, arm_index: int, step: int) -> float:
+        count = self._counts[arm_index]
+        if count == 0:
+            return math.inf
+        t = max(step + 1, 1)
+        mean = self._sums[arm_index] / count
+        variance = self._sum_sq[arm_index] / count - mean * mean
+        if variance < 0.0:
+            variance = 0.0
+        log_t = math.log(t)
+        bonus = math.sqrt(2.0 * variance * log_t / count) + self.c * log_t / count
+        return mean + bonus
+
+    def upper_bound(self, arm_index: int, step: int) -> float:
+        """Return the UCB-V index of ``arm_index`` at 0-indexed ``step``."""
+        if step < 0:
+            raise ValueError("step must be non-negative")
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        return self._index(arm_index, step)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self._index(idx, step) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        self._counts[idx] += 1
+        self._sums[idx] += reward
+        self._sum_sq[idx] += reward * reward
+
+
 def ucb_tuned(*, seed: int | None = None) -> BanditAlgorithm:
     return UCBTuned(seed=seed)
 
@@ -1308,6 +1391,12 @@ def sliding_window_ucb(window: int = 100, *, seed: int | None = None) -> BanditA
 
 def discounted_ucb(gamma: float = 0.9, *, seed: int | None = None) -> BanditAlgorithm:
     return DiscountedUCB(gamma=gamma, seed=seed)
+
+
+def ucb_v(c: float = 3.0, *, seed: int | None = None) -> BanditAlgorithm:
+    return UCBV(c=c, seed=seed)
+
+
 
 
 
@@ -1448,6 +1537,7 @@ __all__ = [
     "UCBTuned",
     "SlidingWindowUCB",
     "DiscountedUCB",
+    "UCBV",
     "MOSS",
     "ThompsonBernoulli",
     "GaussianThompson",
@@ -1457,6 +1547,7 @@ __all__ = [
     "ucb_tuned",
     "sliding_window_ucb",
     "discounted_ucb",
+    "ucb_v",
     "moss",
     "thompson_sampling_bernoulli",
     "thompson_sampling_gaussian",
