@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`linucb`,
-    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`discounted_ucb`, and :func:`moss` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`sliding_window_thompson`, :func:`discounted_ucb`, and :func:`moss` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -1054,6 +1054,80 @@ class SlidingWindowUCB(BanditAlgorithm):
 
 
 
+
+class SlidingWindowThompson(BanditAlgorithm):
+    """Sliding-window Thompson sampling for non-stationary Bernoulli bandits.
+
+    Maintains a global history of the most recent ``window`` pulls and runs
+    Beta-Bernoulli Thompson sampling on the rewards that remain inside that
+    window (same forgetting scheme as :class:`SlidingWindowUCB`). Each step
+    samples ``Beta(alpha_i, beta_i)`` for every Bernoulli arm from the
+    window-restricted posterior and picks the arm with the largest draw.
+    Non-Bernoulli arms fall back to ``expected_value`` as a fixed sample,
+    matching :class:`ThompsonBernoulli`.
+
+    A short window forgets stale successes/failures so the policy can track
+    a changing best arm; when ``window`` exceeds the horizon the policy
+    recovers ordinary Bernoulli Thompson sampling. Pair with
+    :class:`SlidingWindowUCB` / :class:`DiscountedUCB` for non-stationary
+    comparisons.
+    """
+
+    def __init__(self, window: int = 100, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+            raise ValueError("window must be an integer >= 1")
+        self.window = int(window)
+        self._history: List[tuple[int, float]] = []
+        self._alpha: List[float] = []
+        self._beta: List[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._history = []
+        self._alpha = [1.0] * n
+        self._beta = [1.0] * n
+
+    def _rebuild(self) -> None:
+        n = len(self._alpha)
+        self._alpha = [1.0] * n
+        self._beta = [1.0] * n
+        for arm_index, reward in self._history:
+            self._apply_reward(arm_index, reward)
+
+    def _apply_reward(self, idx: int, reward: float) -> None:
+        if reward >= 1.0:
+            self._alpha[idx] += 1.0
+        elif reward <= 0.0:
+            self._beta[idx] += 1.0
+        else:
+            self._alpha[idx] += reward
+            self._beta[idx] += 1.0 - reward
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._alpha:
+            self.reset(arms)
+        samples: List[float] = []
+        for idx, arm in enumerate(arms):
+            if isinstance(arm, BernoulliArm):
+                samples.append(self._rng.betavariate(self._alpha[idx], self._beta[idx]))
+            else:
+                samples.append(arm.expected_value)
+        best = max(samples)
+        candidates = [idx for idx, value in enumerate(samples) if value == best]
+        return candidates[self._rng.randrange(len(candidates))]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._alpha:
+            self.reset(arms)
+        self._history.append((step.arm_index, float(step.reward)))
+        if len(self._history) > self.window:
+            self._history = self._history[-self.window :]
+            self._rebuild()
+        else:
+            self._apply_reward(step.arm_index, float(step.reward))
+
+
 class DiscountedUCB(BanditAlgorithm):
     """Discounted UCB for non-stationary bandits (Garivier & Moulines).
 
@@ -1388,6 +1462,10 @@ def sliding_window_ucb(window: int = 100, *, seed: int | None = None) -> BanditA
     return SlidingWindowUCB(window=window, seed=seed)
 
 
+def sliding_window_thompson(window: int = 100, *, seed: int | None = None) -> BanditAlgorithm:
+    return SlidingWindowThompson(window=window, seed=seed)
+
+
 
 def discounted_ucb(gamma: float = 0.9, *, seed: int | None = None) -> BanditAlgorithm:
     return DiscountedUCB(gamma=gamma, seed=seed)
@@ -1536,6 +1614,7 @@ __all__ = [
     "UCB1",
     "UCBTuned",
     "SlidingWindowUCB",
+    "SlidingWindowThompson",
     "DiscountedUCB",
     "UCBV",
     "MOSS",
@@ -1546,6 +1625,7 @@ __all__ = [
     "ucb1",
     "ucb_tuned",
     "sliding_window_ucb",
+    "sliding_window_thompson",
     "discounted_ucb",
     "ucb_v",
     "moss",
