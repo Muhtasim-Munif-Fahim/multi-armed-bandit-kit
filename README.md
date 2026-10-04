@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `DiscountedUCB`, `UCB-V`, `MOSS`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `MOSS`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, MOSS, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, SW-TS, DiscountedUCB, UCB-V, MOSS, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -216,6 +216,32 @@ print(experiment.summarize(results))
 
 Tune the window from the CLI with `--sliding-window` (default 100). The
 registry name is `"sliding_window_ucb"`.
+
+
+### Sliding-window Thompson sampling (SW-TS)
+
+Sliding-window Thompson sampling keeps only the most recent `window` pulls
+(same global history as sliding-window UCB) and runs Beta-Bernoulli Thompson
+sampling on that window. Old successes and failures fall out of the Beta
+posteriors, so the policy can track a non-stationary best arm. When
+`window` is larger than the horizon it recovers ordinary Bernoulli Thompson
+sampling. The registry name is `"sliding_window_thompson"`; it reuses the
+`--sliding-window` CLI / `sliding_window` experiment parameter.
+
+```python
+from bandit_kit import sliding_window_thompson, run_experiment
+from bandit_kit.arms import BernoulliArm
+
+arms = [BernoulliArm("a", 0.1), BernoulliArm("b", 0.5), BernoulliArm("c", 0.2)]
+experiment, results = run_experiment(
+    arms,
+    algorithms=["sliding_window_thompson", "thompson"],
+    steps=500,
+    runs=20,
+    sliding_window=100,
+)
+print(experiment.summarize(results))
+```
 
 
 ### Discounted UCB

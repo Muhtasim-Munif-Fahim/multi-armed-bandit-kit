@@ -22,6 +22,7 @@ from .algorithms import (
     linucb,
     moss,
     sliding_window_ucb,
+    sliding_window_thompson,
     discounted_ucb,
     ucb_v,
     thompson_sampling_bernoulli,
@@ -56,6 +57,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "softmax": boltzmann,
     "kl_ucb": kl_ucb,
     "sliding_window_ucb": sliding_window_ucb,
+    "sliding_window_thompson": sliding_window_thompson,
     "discounted_ucb": discounted_ucb,
     "ucb_v": ucb_v,
     "moss": moss,
@@ -198,6 +200,8 @@ class BanditExperiment:
         if name == "kl_ucb":
             return factory(c=self.kl_ucb_c, seed=seed)
         if name == "sliding_window_ucb":
+            return factory(window=self.sliding_window, seed=seed)
+        if name == "sliding_window_thompson":
             return factory(window=self.sliding_window, seed=seed)
         if name == "discounted_ucb":
             return factory(gamma=self.discount_gamma, seed=seed)
@@ -528,6 +532,8 @@ class ContextualBanditExperiment:
         if name == "kl_ucb":
             return factory(c=self.kl_ucb_c, seed=seed)
         if name == "sliding_window_ucb":
+            return factory(window=self.sliding_window, seed=seed)
+        if name == "sliding_window_thompson":
             return factory(window=self.sliding_window, seed=seed)
         if name == "discounted_ucb":
             return factory(gamma=self.discount_gamma, seed=seed)
