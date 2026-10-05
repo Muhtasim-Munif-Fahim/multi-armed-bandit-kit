@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -1450,6 +1450,125 @@ class UCBV(BanditAlgorithm):
         self._sum_sq[idx] += reward * reward
 
 
+
+class UCB2(BanditAlgorithm):
+    """UCB2 epoch-based UCB (Auer, Cesa-Bianchi & Fischer, 2002).
+
+    After every arm has been pulled once, each *epoch* picks the arm ``j``
+    that maximises
+
+        ``mean_j + sqrt( (1+α) * ln(e * n / τ(r_j)) / (2 * τ(r_j)) )``
+
+    where ``n`` is the total number of pulls so far, ``r_j`` is the number of
+    completed epochs for arm ``j``, and
+
+        ``τ(r) = ceil((1+α)^r)``.
+
+    The chosen arm is then played for ``τ(r_j+1) - τ(r_j)`` consecutive
+    steps before ``r_j`` is incremented. The parameter ``alpha`` ∈ ``(0, 1)``
+    trades exploration (larger α → longer early epochs / larger bonus).
+    Rewards outside ``[0, 1]`` are clipped so Gaussian arms still run.
+    """
+
+    def __init__(self, alpha: float = 0.1, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+            raise ValueError("alpha must be a number in (0, 1)")
+        alpha = float(alpha)
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must be in (0, 1)")
+        self.alpha = alpha
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._epochs: List[int] = []
+        self._total_pulls = 0
+        self._round_robin = 0
+        self._committed: int | None = None
+        self._remaining = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._epochs = [0] * n
+        self._total_pulls = 0
+        self._round_robin = 0
+        self._committed = None
+        self._remaining = 0
+
+    def tau(self, r: int) -> int:
+        """Return ``ceil((1+α)^r)`` for epoch index ``r`` (≥ 0)."""
+        if isinstance(r, bool) or not isinstance(r, int) or r < 0:
+            raise ValueError("r must be a non-negative integer")
+        return int(math.ceil((1.0 + self.alpha) ** r))
+
+    def _radius(self, arm_index: int) -> float:
+        r = self._epochs[arm_index]
+        tau_r = max(self.tau(r), 1)
+        n = max(self._total_pulls, 1)
+        # a_{n,r} = sqrt( (1+α) ln(e n / τ(r)) / (2 τ(r)) )
+        inside = (1.0 + self.alpha) * math.log((math.e * n) / tau_r) / (2.0 * tau_r)
+        if inside < 0.0:
+            inside = 0.0
+        return math.sqrt(inside)
+
+    def upper_bound(self, arm_index: int) -> float:
+        """Return the UCB2 index of ``arm_index`` given current statistics."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        count = self._counts[arm_index]
+        if count == 0:
+            return math.inf
+        mean = self._sums[arm_index] / count
+        return mean + self._radius(arm_index)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        # Continue an in-progress epoch.
+        if self._committed is not None and self._remaining > 0:
+            return int(self._committed)
+        # Warm-up: pull every arm once (no epoch accounting).
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self.upper_bound(idx) for idx in range(len(arms))]
+        best = max(scores)
+        candidates = [idx for idx, score in enumerate(scores) if score == best]
+        chosen = candidates[0]
+        r = self._epochs[chosen]
+        length = max(1, self.tau(r + 1) - self.tau(r))
+        self._committed = chosen
+        self._remaining = length
+        return chosen
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        self._counts[idx] += 1
+        self._sums[idx] += reward
+        self._total_pulls += 1
+        if self._committed is None:
+            # Warm-up updates: nothing else to do.
+            return
+        if idx != self._committed:
+            # Defensive: ignore mismatched updates.
+            return
+        self._remaining -= 1
+        if self._remaining <= 0:
+            self._epochs[idx] += 1
+            self._committed = None
+            self._remaining = 0
+
+
+def ucb2(alpha: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
+    return UCB2(alpha=alpha, seed=seed)
+
+
 def ucb_tuned(*, seed: int | None = None) -> BanditAlgorithm:
     return UCBTuned(seed=seed)
 
@@ -1617,6 +1736,7 @@ __all__ = [
     "SlidingWindowThompson",
     "DiscountedUCB",
     "UCBV",
+    "UCB2",
     "MOSS",
     "ThompsonBernoulli",
     "GaussianThompson",
@@ -1628,6 +1748,7 @@ __all__ = [
     "sliding_window_thompson",
     "discounted_ucb",
     "ucb_v",
+    "ucb2",
     "moss",
     "thompson_sampling_bernoulli",
     "thompson_sampling_gaussian",

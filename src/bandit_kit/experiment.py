@@ -25,6 +25,7 @@ from .algorithms import (
     sliding_window_thompson,
     discounted_ucb,
     ucb_v,
+    ucb2,
     thompson_sampling_bernoulli,
     thompson_sampling_gaussian,
     ucb1,
@@ -60,6 +61,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "sliding_window_thompson": sliding_window_thompson,
     "discounted_ucb": discounted_ucb,
     "ucb_v": ucb_v,
+    "ucb2": ucb2,
     "moss": moss,
 }
 
@@ -112,6 +114,7 @@ class BanditExperiment:
     sliding_window: int = 100
     discount_gamma: float = 0.9
     ucb_v_c: float = 3.0
+    ucb2_alpha: float = 0.1
     moss_horizon: int | None = None
     thompson_gaussian_mu0: float = 0.0
     thompson_gaussian_tau0: float = 1.0
@@ -149,6 +152,8 @@ class BanditExperiment:
             raise ValueError("discount_gamma must be in (0, 1]")
         if self.ucb_v_c < 0.0:
             raise ValueError("ucb_v_c must be non-negative")
+        if not 0.0 < float(self.ucb2_alpha) < 1.0:
+            raise ValueError("ucb2_alpha must be in (0, 1)")
         if self.moss_horizon is not None:
             if isinstance(self.moss_horizon, bool) or not isinstance(self.moss_horizon, int) or self.moss_horizon < 1:
                 raise ValueError("moss_horizon must be an integer >= 1")
@@ -207,6 +212,8 @@ class BanditExperiment:
             return factory(gamma=self.discount_gamma, seed=seed)
         if name == "ucb_v":
             return factory(c=self.ucb_v_c, seed=seed)
+        if name == "ucb2":
+            return factory(alpha=self.ucb2_alpha, seed=seed)
         if name == "moss":
             horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
             return factory(horizon=horizon, seed=seed)
@@ -321,6 +328,7 @@ class BanditExperiment:
                 "sliding_window": self.sliding_window,
                 "discount_gamma": self.discount_gamma,
                 "ucb_v_c": self.ucb_v_c,
+                "ucb2_alpha": self.ucb2_alpha,
                 "lints_v": self.lints_v,
                 "lints_ridge": self.lints_ridge,
             })
@@ -348,6 +356,7 @@ def run_experiment(
     sliding_window: int = 100,
     discount_gamma: float = 0.9,
     ucb_v_c: float = 3.0,
+    ucb2_alpha: float = 0.1,
     moss_horizon: int | None = None,
     thompson_gaussian_mu0: float = 0.0,
     thompson_gaussian_tau0: float = 1.0,
@@ -373,6 +382,7 @@ def run_experiment(
         sliding_window=sliding_window,
         discount_gamma=discount_gamma,
         ucb_v_c=ucb_v_c,
+        ucb2_alpha=ucb2_alpha,
         moss_horizon=moss_horizon,
         thompson_gaussian_mu0=thompson_gaussian_mu0,
         thompson_gaussian_tau0=thompson_gaussian_tau0,
@@ -451,6 +461,7 @@ class ContextualBanditExperiment:
     sliding_window: int = 100
     discount_gamma: float = 0.9
     ucb_v_c: float = 3.0
+    ucb2_alpha: float = 0.1
     moss_horizon: int | None = None
     context_intercept: bool = True
 
@@ -497,6 +508,8 @@ class ContextualBanditExperiment:
             raise ValueError("discount_gamma must be in (0, 1]")
         if self.ucb_v_c < 0.0:
             raise ValueError("ucb_v_c must be non-negative")
+        if not 0.0 < float(self.ucb2_alpha) < 1.0:
+            raise ValueError("ucb2_alpha must be in (0, 1)")
 
     @property
     def dimension(self) -> int:
@@ -539,6 +552,8 @@ class ContextualBanditExperiment:
             return factory(gamma=self.discount_gamma, seed=seed)
         if name == "ucb_v":
             return factory(c=self.ucb_v_c, seed=seed)
+        if name == "ucb2":
+            return factory(alpha=self.ucb2_alpha, seed=seed)
         if name == "moss":
             horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
             return factory(horizon=horizon, seed=seed)
