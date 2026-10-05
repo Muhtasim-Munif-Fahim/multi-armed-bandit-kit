@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `MOSS`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
 `KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -23,7 +23,7 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, SW-TS, DiscountedUCB, UCB-V, MOSS, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, SW-TS, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling, EXP3,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
 EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
@@ -312,6 +312,29 @@ print(experiment.summarize(results))
 
 Tune the additive constant from the CLI with `--ucb-v-c` (default 3.0).
 
+
+
+### UCB2
+
+UCB2 (Auer, Cesa-Bianchi & Fischer, Machine Learning 2002) is an epoch-based
+UCB. After a one-pull warm-up it repeatedly picks the arm that maximises
+`mean + sqrt((1+α) ln(e n / τ(r)) / (2 τ(r)))` with `τ(r) = ceil((1+α)^r)`,
+then plays that arm for `τ(r+1) - τ(r)` consecutive steps before bumping its
+epoch counter. The registry name is `"ucb2"`; pass `ucb2_alpha` (default
+`0.1`) to tune α.
+
+```python
+from bandit_kit import ucb2, run_experiment
+
+experiment, results = run_experiment(
+    arms,
+    algorithms=["ucb2", "ucb1"],
+    steps=300,
+    runs=10,
+    seed=0,
+    ucb2_alpha=0.1,
+)
+```
 
 ### UCB-Tuned
 
