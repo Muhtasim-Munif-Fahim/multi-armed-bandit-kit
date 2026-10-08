@@ -336,6 +336,27 @@ experiment, results = run_experiment(
 )
 ```
 
+### IMED
+
+IMED (Indexed Minimum Empirical Divergence; Honda & Takemura, JMLR 2015)
+is an asymptotically optimal policy for Bernoulli / `[0, 1]` rewards. After
+a one-pull warm-up it pulls the arm with the **smallest** index
+`N_a * KL(mean_a, best_mean) + log(N_a)`, where `KL` is the Bernoulli
+divergence. It matches the KL-UCB regret guarantee but needs no
+root-finding. The registry name is `"imed"`.
+
+```python
+from bandit_kit import imed, run_experiment
+
+experiment, results = run_experiment(
+    arms,
+    algorithms=["imed", "kl_ucb", "ucb1"],
+    steps=500,
+    runs=10,
+    seed=0,
+)
+```
+
 ### UCB-Tuned
 
 UCB-Tuned (Auer, Cesa-Bianchi & Fischer, 2002) is a variance-aware UCB

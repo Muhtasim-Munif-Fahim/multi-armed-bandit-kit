@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB, IMED.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -889,6 +889,84 @@ class KLUCB(BanditAlgorithm):
 
 
 
+class IMED(BanditAlgorithm):
+    """IMED — Indexed Minimum Empirical Divergence (Honda & Takemura, JMLR 2015).
+
+    After every arm has been pulled once, each step picks the arm with the
+    **smallest** index
+
+        ``I_a = N_a * d(μ̂_a, μ̂*) + log(N_a)``
+
+    where ``d`` is the Bernoulli KL divergence, ``μ̂_a`` and ``N_a`` are the
+    arm's empirical mean and pull count, and ``μ̂* = max_a μ̂_a``. The
+    current leader always has ``d = 0`` and index ``log(N_*)``; a trailing
+    arm is pulled once its divergence-weighted count falls below that.
+    IMED is asymptotically optimal (it matches the Lai-Robbins lower bound
+    for Bernoulli arms) like KL-UCB, but its index is closed-form, so no
+    root-finding is needed and selection is deterministic.
+
+    Rewards outside ``[0, 1]`` are clipped, matching KL-UCB. ``μ̂*`` is
+    clipped to ``[eps, 1 - eps]`` inside the divergence so a leader with a
+    perfect empirical record does not make every other index infinite.
+    Ties break toward the lower arm index.
+    """
+
+    name = "imed"
+
+    def __init__(self, eps: float = 1e-12, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if isinstance(eps, bool) or not 0.0 < float(eps) < 0.5:
+            raise ValueError("eps must be in (0, 0.5)")
+        self.eps = float(eps)
+        self._counts: List[int] = []
+        self._values: List[float] = []
+        self._round_robin = 0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._counts = [0] * len(arms)
+        self._values = [0.0] * len(arms)
+        self._round_robin = 0
+
+    def index(self, arm_index: int) -> float:
+        """Return the IMED index of ``arm_index`` (``-inf`` before its first pull)."""
+        if arm_index < 0 or arm_index >= len(self._counts):
+            raise IndexError("arm_index out of range")
+        count = self._counts[arm_index]
+        if count == 0:
+            return -math.inf
+        pulled = [v for v, n in zip(self._values, self._counts) if n > 0]
+        leader = min(max(max(pulled), self.eps), 1.0 - self.eps)
+        divergence = _bernoulli_kl(self._values[arm_index], leader)
+        if self._values[arm_index] >= leader:
+            divergence = 0.0
+        return count * divergence + math.log(count)
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        zero_indices = [idx for idx, count in enumerate(self._counts) if count == 0]
+        if zero_indices:
+            chosen = zero_indices[self._round_robin % len(zero_indices)]
+            self._round_robin += 1
+            return chosen
+        scores = [self.index(idx) for idx in range(len(arms))]
+        best = min(scores)
+        return scores.index(best)
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        new_n = self._counts[idx] + 1
+        self._values[idx] += (reward - self._values[idx]) / new_n
+        self._counts[idx] = new_n
+
+
+def imed(eps: float = 1e-12, *, seed: int | None = None) -> BanditAlgorithm:
+    return IMED(eps=eps, seed=seed)
+
+
 class UCBTuned(BanditAlgorithm):
     """UCB-Tuned (Auer, Cesa-Bianchi & Fischer, Machine Learning 2002).
 
@@ -1771,4 +1849,6 @@ __all__ = [
     "Softmax",
     "kl_ucb",
     "KLUCB",
+    "imed",
+    "IMED",
 ]
