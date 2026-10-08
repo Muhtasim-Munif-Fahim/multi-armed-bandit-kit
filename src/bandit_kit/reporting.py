@@ -146,6 +146,12 @@ def render_markdown_report(
                 "Bernoulli KL-UCB index "
                 f"(c={experiment.kl_ucb_c}); rewards outside [0, 1] are clipped."
             )
+        elif algo == "imed":
+            lines.append(
+                "- imed (Honda & Takemura) pulls the arm minimising "
+                "N * KL(mean, best mean) + log(N); asymptotically optimal "
+                "with a closed-form index. Rewards outside [0, 1] are clipped."
+            )
     lines.append("")
     return "\n".join(lines)
 
