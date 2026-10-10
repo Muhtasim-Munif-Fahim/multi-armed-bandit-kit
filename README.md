@@ -3,7 +3,8 @@
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
 stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
-`KL-UCB`) plus the adversarial-bandit policy `EXP3`, the contextual
+`KL-UCB`, `IMED`) plus the adversarial-bandit policy `EXP3`, the best-of-both-worlds
+policy `Tsallis-INF`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
 It provides seedable synthetic Bernoulli,
@@ -354,6 +355,33 @@ experiment, results = run_experiment(
     steps=500,
     runs=10,
     seed=0,
+)
+```
+
+### Tsallis-INF
+
+Tsallis-INF (Zimmert & Seldin, JMLR 2021) is a "best of both worlds"
+policy: it is minimax-optimal (`O(sqrt(K T))`) against adversarial rewards
+and still gets logarithmic regret on stochastic arms, without knowing
+which regime it faces. It runs online mirror descent with the 1/2-Tsallis
+entropy over cumulative loss estimates `L_i` (loss = `1 - reward`, rewards
+clipped to `[0, 1]`) and samples from `p_i = 4 / (eta_t (L_i - x))^2`,
+where Newton's method finds the normaliser `x` and `eta_t = eta_scale / sqrt(t)`.
+`estimator="iw"` (importance-weighted, `eta_scale=2`) is the default;
+`estimator="rv"` uses the reduced-variance estimator (`eta_scale=4`). The
+registry name is `"tsallis_inf"`. For experiments use `tsallis_estimator`,
+and on the command line `--tsallis-estimator`.
+
+```python
+from bandit_kit import run_experiment
+
+experiment, results = run_experiment(
+    arms,
+    algorithms=["tsallis_inf", "exp3", "ucb1"],
+    steps=1000,
+    runs=10,
+    seed=0,
+    tsallis_estimator="rv",
 )
 ```
 

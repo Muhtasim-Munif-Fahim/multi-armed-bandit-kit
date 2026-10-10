@@ -19,6 +19,7 @@ from .algorithms import (
     gradient_bandit,
     kl_ucb,
     imed,
+    tsallis_inf,
     lints,
     linucb,
     moss,
@@ -59,6 +60,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "softmax": boltzmann,
     "kl_ucb": kl_ucb,
     "imed": imed,
+    "tsallis_inf": tsallis_inf,
     "sliding_window_ucb": sliding_window_ucb,
     "sliding_window_thompson": sliding_window_thompson,
     "discounted_ucb": discounted_ucb,
@@ -117,6 +119,7 @@ class BanditExperiment:
     discount_gamma: float = 0.9
     ucb_v_c: float = 3.0
     ucb2_alpha: float = 0.1
+    tsallis_estimator: str = "iw"
     moss_horizon: int | None = None
     thompson_gaussian_mu0: float = 0.0
     thompson_gaussian_tau0: float = 1.0
@@ -156,6 +159,8 @@ class BanditExperiment:
             raise ValueError("ucb_v_c must be non-negative")
         if not 0.0 < float(self.ucb2_alpha) < 1.0:
             raise ValueError("ucb2_alpha must be in (0, 1)")
+        if self.tsallis_estimator not in ("iw", "rv"):
+            raise ValueError("tsallis_estimator must be 'iw' or 'rv'")
         if self.moss_horizon is not None:
             if isinstance(self.moss_horizon, bool) or not isinstance(self.moss_horizon, int) or self.moss_horizon < 1:
                 raise ValueError("moss_horizon must be an integer >= 1")
@@ -216,6 +221,8 @@ class BanditExperiment:
             return factory(c=self.ucb_v_c, seed=seed)
         if name == "ucb2":
             return factory(alpha=self.ucb2_alpha, seed=seed)
+        if name == "tsallis_inf":
+            return factory(estimator=self.tsallis_estimator, seed=seed)
         if name == "moss":
             horizon = self.moss_horizon if self.moss_horizon is not None else self.steps
             return factory(horizon=horizon, seed=seed)
@@ -359,6 +366,7 @@ def run_experiment(
     discount_gamma: float = 0.9,
     ucb_v_c: float = 3.0,
     ucb2_alpha: float = 0.1,
+    tsallis_estimator: str = "iw",
     moss_horizon: int | None = None,
     thompson_gaussian_mu0: float = 0.0,
     thompson_gaussian_tau0: float = 1.0,
@@ -385,6 +393,7 @@ def run_experiment(
         discount_gamma=discount_gamma,
         ucb_v_c=ucb_v_c,
         ucb2_alpha=ucb2_alpha,
+        tsallis_estimator=tsallis_estimator,
         moss_horizon=moss_horizon,
         thompson_gaussian_mu0=thompson_gaussian_mu0,
         thompson_gaussian_tau0=thompson_gaussian_tau0,

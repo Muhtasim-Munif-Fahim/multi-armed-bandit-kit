@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB, IMED.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -40,7 +40,7 @@ class BanditAlgorithm:
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
     :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`linucb`,
-    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`sliding_window_thompson`, :func:`discounted_ucb`, and :func:`moss` return subclasses of this object.
+    :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`sliding_window_thompson`, :func:`discounted_ucb`, :func:`moss`, and :func:`tsallis_inf` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
     """
@@ -1641,6 +1641,149 @@ class UCB2(BanditAlgorithm):
             self._epochs[idx] += 1
             self._committed = None
             self._remaining = 0
+
+
+class TsallisINF(BanditAlgorithm):
+    """Tsallis-INF with 1/2-Tsallis entropy (Zimmert & Seldin, JMLR 2021).
+
+    A "best of both worlds" policy: it attains the optimal ``O(sqrt(K T))``
+    regret against adversarial rewards *and* logarithmic regret on
+    stochastic arms, without knowing which regime it is in. It runs online
+    mirror descent on cumulative loss estimates ``L_i`` (losses are
+    ``1 - reward`` with rewards clipped to ``[0, 1]``) with the 1/2-Tsallis
+    regulariser, which gives the sampling distribution
+
+        ``p_i = 4 / (eta_t * (L_i - x))^2``
+
+    where the normaliser ``x < min_i L_i`` is found by Newton's method so
+    that ``sum_i p_i = 1``, and ``eta_t = eta_scale / sqrt(t)``.
+
+    ``estimator="iw"`` uses the importance-weighted loss ``l / p`` (paper
+    default ``eta_scale = 2``). ``estimator="rv"`` uses the reduced-variance
+    estimator ``(l - B) / p + B`` with ``B = 1/2`` whenever ``p >= eta_t^2``
+    (paper default ``eta_scale = 4``); unchosen arms then receive ``B``.
+    """
+
+    name = "tsallis_inf"
+
+    def __init__(
+        self,
+        estimator: str = "iw",
+        eta_scale: float | None = None,
+        *,
+        newton_tol: float = 1e-12,
+        max_newton_iter: int = 100,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if estimator not in ("iw", "rv"):
+            raise ValueError("estimator must be 'iw' or 'rv'")
+        if eta_scale is None:
+            eta_scale = 2.0 if estimator == "iw" else 4.0
+        if isinstance(eta_scale, bool) or not float(eta_scale) > 0.0:
+            raise ValueError("eta_scale must be positive")
+        if not float(newton_tol) > 0.0:
+            raise ValueError("newton_tol must be positive")
+        if isinstance(max_newton_iter, bool) or int(max_newton_iter) < 1:
+            raise ValueError("max_newton_iter must be >= 1")
+        self.estimator = estimator
+        self.eta_scale = float(eta_scale)
+        self.newton_tol = float(newton_tol)
+        self.max_newton_iter = int(max_newton_iter)
+        self._losses: List[float] = []
+        self._t = 0
+        self._x: float | None = None
+        self._last_probabilities: List[float] = []
+        self._last_eta = 0.0
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._losses = [0.0] * len(arms)
+        self._t = 0
+        self._x = None
+        self._last_probabilities = []
+        self._last_eta = 0.0
+
+    def learning_rate(self, t: int) -> float:
+        """``eta_t = eta_scale / sqrt(t)`` for round ``t >= 1``."""
+        if t < 1:
+            raise ValueError("t must be >= 1")
+        return self.eta_scale / math.sqrt(t)
+
+    def _solve(self, eta: float) -> List[float]:
+        losses = self._losses
+        low = min(losses)
+        # x must stay strictly below min(L); start where the leader has p <= 1.
+        x = low - 2.0 / eta
+        if self._x is not None and self._x < low:
+            x = max(x, self._x)
+        for _ in range(self.max_newton_iter):
+            weights = [4.0 / (eta * (loss - x)) ** 2 for loss in losses]
+            total = sum(weights)
+            if abs(total - 1.0) <= self.newton_tol:
+                break
+            slope = eta * sum(w ** 1.5 for w in weights)
+            step = (total - 1.0) / slope
+            x_new = x - step
+            if x_new >= low:  # keep the iterate in the valid region
+                x_new = (x + low) / 2.0
+            x = x_new
+        weights = [4.0 / (eta * (loss - x)) ** 2 for loss in losses]
+        total = sum(weights)
+        self._x = x
+        return [w / total for w in weights]
+
+    def probabilities(self) -> List[float]:
+        """Sampling distribution for the next round (does not advance time)."""
+        if not self._losses:
+            raise RuntimeError("call reset(arms) before probabilities()")
+        return self._solve(self.learning_rate(self._t + 1))
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if len(self._losses) != len(arms):
+            self.reset(arms)
+        eta = self.learning_rate(self._t + 1)
+        probabilities = self._solve(eta)
+        self._last_probabilities = probabilities
+        self._last_eta = eta
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if len(self._losses) != len(arms):
+            self.reset(arms)
+        if len(self._last_probabilities) != len(arms):
+            self._last_eta = self.learning_rate(self._t + 1)
+            self._last_probabilities = self._solve(self._last_eta)
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        loss = 1.0 - reward
+        probabilities = self._last_probabilities
+        if self.estimator == "iw":
+            self._losses[idx] += loss / probabilities[idx]
+        else:
+            eta_sq = self._last_eta ** 2
+            for i, prob in enumerate(probabilities):
+                baseline = 0.5 if prob >= eta_sq else 0.0
+                if i == idx:
+                    self._losses[i] += (loss - baseline) / prob + baseline
+                else:
+                    self._losses[i] += baseline
+        self._t += 1
+        self._last_probabilities = []
+
+
+def tsallis_inf(
+    estimator: str = "iw",
+    eta_scale: float | None = None,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return TsallisINF(estimator=estimator, eta_scale=eta_scale, seed=seed)
 
 
 def ucb2(alpha: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
