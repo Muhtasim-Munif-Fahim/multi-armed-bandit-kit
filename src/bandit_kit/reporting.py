@@ -152,6 +152,13 @@ def render_markdown_report(
                 "N * KL(mean, best mean) + log(N); asymptotically optimal "
                 "with a closed-form index. Rewards outside [0, 1] are clipped."
             )
+        elif algo == "tsallis_inf":
+            lines.append(
+                "- tsallis_inf (Zimmert & Seldin) samples from the 1/2-Tsallis "
+                "mirror-descent distribution over cumulative loss estimates "
+                f"(estimator={getattr(experiment, 'tsallis_estimator', 'iw')}); "
+                "optimal in both stochastic and adversarial regimes."
+            )
     lines.append("")
     return "\n".join(lines)
 

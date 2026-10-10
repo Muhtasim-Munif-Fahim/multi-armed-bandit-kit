@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import boltzmann, discounted_ucb, epsilon_greedy, exp3, imed, kl_ucb, moss, sliding_window_ucb, sliding_window_thompson, ucb1, ucb_tuned, ucb_v, ucb2, thompson_sampling_bernoulli, thompson_sampling_gaussian
+from .algorithms import boltzmann, discounted_ucb, epsilon_greedy, exp3, imed, kl_ucb, moss, sliding_window_ucb, sliding_window_thompson, ucb1, ucb_tuned, ucb_v, ucb2, thompson_sampling_bernoulli, thompson_sampling_gaussian, tsallis_inf
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -23,6 +23,7 @@ ALGORITHMS = {
     "boltzmann": boltzmann,
     "kl_ucb": kl_ucb,
     "imed": imed,
+    "tsallis_inf": tsallis_inf,
     "sliding_window_ucb": sliding_window_ucb,
     "sliding_window_thompson": sliding_window_thompson,
     "discounted_ucb": discounted_ucb,
@@ -92,6 +93,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.1,
         help="UCB2 epoch parameter α in (0, 1) (default: 0.1)",
+    )
+    compare.add_argument(
+        "--tsallis-estimator",
+        choices=("iw", "rv"),
+        default="iw",
+        help="Tsallis-INF loss estimator: importance-weighted or reduced-variance (default: iw)",
     )
     compare.add_argument(
         "--moss-horizon",
@@ -292,6 +299,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
             discount_gamma=args.discount_gamma,
             ucb_v_c=args.ucb_v_c,
             ucb2_alpha=args.ucb2_alpha,
+            tsallis_estimator=args.tsallis_estimator,
             moss_horizon=args.moss_horizon,
         )
     except ValueError as exc:
