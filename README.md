@@ -478,3 +478,29 @@ experiment = BanditExperiment(
 
 See `examples/run_demo.py` for a complete end-to-end demo and
 `tests/` for the unit-test contract.
+
+### Best-arm identification (Successive Rejects, Sequential Halving, LUCB)
+
+The policies above minimise regret. Pure-exploration *best-arm identification* has a different goal: run the experiment, then name the arm with the highest mean.
+
+- `successive_rejects(arms, budget)`: fixed budget (Audibert & Bubeck, 2010). Runs `K - 1` phases of lengths `n_k = ceil((n - K) / (logbar(K) (K + 1 - k)))` and drops the empirically worst arm after each one. Needs no tuning.
+- `successive_halving(arms, budget)`: fixed budget (Karnin, Koren & Somekh, 2013). Runs `ceil(log2 K)` rounds on fresh samples and keeps the top half each round.
+- `lucb(arms, delta=0.05, epsilon=0.0)`: fixed confidence (LUCB1, Kalyanakrishnan et al., 2012). Pulls the leader and the strongest UCB challenger, and stops once the leader is `epsilon`-optimal with probability at least `1 - delta`.
+- `identification_error_rate(method, arms, n_runs, seed, **kwargs)`: Monte Carlo estimate of the misidentification rate and the mean number of pulls, using reseeded copies of the arms.
+
+```python
+from bandit_kit import BernoulliArm, identification_error_rate, lucb, successive_rejects
+
+arms = [BernoulliArm(f"v{i}", p, seed=i) for i, p in enumerate([0.50, 0.45, 0.40, 0.40])]
+res = successive_rejects(arms, budget=3000)
+print(res.recommended, res.elimination_order, res.total_pulls)
+
+print(identification_error_rate(successive_rejects, arms, n_runs=200, budget=3000))
+easy = [BernoulliArm("a", 0.8, seed=1), BernoulliArm("b", 0.3, seed=2)]
+print(lucb(easy, delta=0.05).total_pulls)  # stops as soon as the gap is resolved
+```
+
+```bash
+bandit-kit identify --arms bern:0.5,bern:0.45,bern:0.4 --method sr --budget 3000 --runs 200
+bandit-kit identify --arms bern:0.8,bern:0.3 --method lucb --delta 0.05 --json
+```

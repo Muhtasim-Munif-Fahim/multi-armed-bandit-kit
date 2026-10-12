@@ -1,5 +1,13 @@
 """Multi-armed bandit algorithms, experiments, and reporting."""
 
+from .identification import (
+    BestArmResult,
+    identification_error_rate,
+    lucb,
+    successive_halving,
+    successive_rejects,
+    successive_rejects_schedule,
+)
 from .algorithms import (
     BanditAlgorithm,
     BanditStep,
@@ -90,6 +98,12 @@ from .visualization import (
 )
 
 __all__ = [
+    "BestArmResult",
+    "identification_error_rate",
+    "lucb",
+    "successive_halving",
+    "successive_rejects",
+    "successive_rejects_schedule",
     "Arm",
     "BernoulliArm",
     "GaussianArm",

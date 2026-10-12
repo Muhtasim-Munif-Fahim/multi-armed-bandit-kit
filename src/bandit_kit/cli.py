@@ -112,8 +112,91 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Write the markdown report to a file instead of stdout",
     )
     _build_best_parser(sub)
+    _build_identify_parser(sub)
     _build_contextual_parser(sub)
     return parser
+
+
+def _build_identify_parser(sub) -> None:
+    identify = sub.add_parser(
+        "identify",
+        help="Best-arm identification: Successive Rejects, Sequential Halving, or LUCB",
+    )
+    identify.add_argument(
+        "--arms", required=True,
+        help="Comma-separated arm specs, e.g. 'bern:0.5,bern:0.45,bern:0.4'",
+    )
+    identify.add_argument(
+        "--method", choices=["sr", "sh", "lucb"], default="sr",
+        help="sr = Successive Rejects, sh = Sequential Halving (fixed budget); lucb = LUCB1 (fixed confidence)",
+    )
+    identify.add_argument("--budget", type=int, default=2000, help="Pull budget for sr / sh (default: 2000)")
+    identify.add_argument("--delta", type=float, default=0.05, help="LUCB error probability (default: 0.05)")
+    identify.add_argument("--epsilon", type=float, default=0.0, help="LUCB slack (default: 0)")
+    identify.add_argument("--max-pulls", type=int, default=100_000, help="LUCB pull cap (default: 100000)")
+    identify.add_argument(
+        "--runs", type=int, default=0,
+        help="Also estimate the misidentification rate over this many reseeded runs",
+    )
+    identify.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    identify.add_argument("--json", action="store_true", help="Print JSON")
+
+
+def cmd_identify(args: argparse.Namespace) -> int:
+    """Run one best-arm identification and optionally its error rate."""
+    from .arms import BernoulliArm, GaussianArm
+    from .identification import (
+        identification_error_rate,
+        lucb,
+        successive_halving,
+        successive_rejects,
+    )
+
+    try:
+        specs = [spec for spec in args.arms.split(",") if spec.strip()]
+        arms = []
+        for i, spec in enumerate(specs):
+            arm = arm_from_spec(spec)
+            if isinstance(arm, BernoulliArm):
+                arm = BernoulliArm(arm.name, arm.p, seed=args.seed + i)
+            elif isinstance(arm, GaussianArm):
+                arm = GaussianArm(arm.name, arm.mean, arm.std, seed=args.seed + i)
+            arms.append(arm)
+        if args.method == "lucb":
+            method, kwargs = lucb, {"delta": args.delta, "epsilon": args.epsilon, "max_pulls": args.max_pulls}
+        else:
+            method = successive_rejects if args.method == "sr" else successive_halving
+            kwargs = {"budget": args.budget}
+        result = method(arms, **kwargs)
+        payload = {
+            "method": result.method,
+            "recommended": result.recommended,
+            "correct": result.is_correct(arms),
+            "oracle_arm": best_arm(arms).name,
+            "total_pulls": result.total_pulls,
+            "stopped": result.stopped,
+            "pulls": result.pulls,
+            "empirical_means": result.empirical_means,
+        }
+        if args.runs:
+            payload["error_rate"] = identification_error_rate(
+                method, arms, n_runs=args.runs, seed=args.seed + 1000, **kwargs
+            )
+    except ValueError as exc:
+        print(f"identify: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"method: {payload['method']}")
+        print(f"recommended arm: {payload['recommended']} (oracle: {payload['oracle_arm']})")
+        print(f"total pulls: {payload['total_pulls']}" + ("" if payload["stopped"] else " (hit --max-pulls)"))
+        for name, count in payload["pulls"].items():
+            print(f"  {name}: pulls={count} mean={payload['empirical_means'][name]:.4f}")
+        if args.runs:
+            rate = payload["error_rate"]
+            print(f"misidentification rate over {args.runs} runs: {rate['error_rate']:.3f}")
+    return 0
 
 
 def _build_best_parser(sub):
@@ -330,6 +413,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compare(args)
     if args.command == "best":
         return cmd_best(args)
+    if args.command == "identify":
+        return cmd_identify(args)
     if args.command == "compare-contextual":
         return cmd_compare_contextual(args)
     parser.error(f"unknown command: {args.command}")
