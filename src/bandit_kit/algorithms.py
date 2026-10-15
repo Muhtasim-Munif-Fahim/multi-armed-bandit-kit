@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, EXP3-IX, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -411,6 +411,82 @@ class Exp3(BanditAlgorithm):
         probability = self._last_probabilities[idx]
         estimated = reward / probability
         self._weights[idx] *= math.exp(self.gamma * estimated / n)
+        max_weight = max(self._weights)
+        if max_weight > 0.0:
+            self._weights = [weight / max_weight for weight in self._weights]
+        self._last_probabilities = []
+
+
+class Exp3IX(BanditAlgorithm):
+    """EXP3-IX adversarial bandit with implicit exploration (Neu 2015).
+
+    Like EXP3, maintains per-arm weights and samples from a mixture of the
+    weight distribution and the uniform distribution. The importance-weighted
+    loss estimate uses an *implicit exploration* bias ``eta``:
+
+        ``hat_loss_i = (1 - reward) / (p_i + eta)``
+
+    only for the played arm (others get 0). Weights update as
+    ``w_i *= exp(-eta * hat_loss_i)``. This yields high-probability regret
+    bounds without explicit importance-weight truncation. Rewards are
+    clipped to [0, 1]. ``eta`` defaults to ``sqrt(2 * log(K) / (K * T))``
+    style via a fixed ``eta`` parameter (default 0.1); set ``gamma`` for
+    optional uniform mixing (default 0 uses pure IX probabilities).
+    """
+
+    def __init__(
+        self,
+        eta: float = 0.1,
+        gamma: float = 0.0,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if eta <= 0.0:
+            raise ValueError("eta must be positive")
+        if not 0.0 <= gamma <= 1.0:
+            raise ValueError("gamma must be in [0, 1]")
+        self.eta = float(eta)
+        self.gamma = float(gamma)
+        self._weights: list[float] = []
+        self._last_probabilities: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._weights = [1.0] * len(arms)
+        self._last_probabilities = []
+
+    def _distribution(self) -> list[float]:
+        n = len(self._weights)
+        total = sum(self._weights)
+        base = [weight / total for weight in self._weights]
+        if self.gamma <= 0.0:
+            return base
+        return [
+            (1.0 - self.gamma) * p + self.gamma / n
+            for p in base
+        ]
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        probabilities = self._distribution()
+        self._last_probabilities = probabilities
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        n = len(self._weights)
+        if len(self._last_probabilities) != n:
+            self._last_probabilities = self._distribution()
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        loss = 1.0 - reward
+        probability = self._last_probabilities[idx]
+        hat_loss = loss / (probability + self.eta)
+        self._weights[idx] *= math.exp(-self.eta * hat_loss)
         max_weight = max(self._weights)
         if max_weight > 0.0:
             self._weights = [weight / max_weight for weight in self._weights]
@@ -1884,6 +1960,15 @@ def exp3(gamma: float = 0.1, *, seed: int | None = None) -> BanditAlgorithm:
     return Exp3(gamma=gamma, seed=seed)
 
 
+def exp3_ix(
+    eta: float = 0.1,
+    gamma: float = 0.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return Exp3IX(eta=eta, gamma=gamma, seed=seed)
+
+
 def linucb(
     alpha: float = 1.0,
     dimension: int = 1,
@@ -1981,6 +2066,8 @@ __all__ = [
     "gradient_bandit",
     "GradientBandit",
     "exp3",
+    "exp3_ix",
+    "Exp3IX",
     "Exp3",
     "linucb",
     "LinUCB",
