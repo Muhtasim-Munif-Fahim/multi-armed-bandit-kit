@@ -3,7 +3,8 @@
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
 stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
-`KL-UCB`, `IMED`) plus the adversarial-bandit policy `EXP3`, the best-of-both-worlds
+`KL-UCB`, `IMED`) plus the adversarial-bandit policies `EXP3`, `EXP3-IX`, and the switching-adversary
+`EXP3.S`, the best-of-both-worlds
 policy `Tsallis-INF`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
 Boltzmann / softmax exploration with a decaying temperature schedule.
@@ -24,9 +25,10 @@ pip install -e .
 bandit-kit compare --arms 'bern:0.1,bern:0.2,bern:0.05' --steps 200 --runs 20 -o report.md
 ```
 
-`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, SW-TS, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling, EXP3,
+`compare` runs epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, SW-TS, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling, EXP3, EXP3-IX, EXP3.S,
 Boltzmann / softmax, and KL-UCB. Tune epsilon-greedy with `--epsilon`,
-EXP3 with `--gamma`, Boltzmann with `--temperature-start`,
+EXP3 / EXP3.S with `--gamma`, EXP3-IX with `--exp3-ix-eta`, EXP3.S's
+fixed-share switching rate with `--exp3-s-alpha`, Boltzmann with `--temperature-start`,
 `--temperature-min`, and `--temperature-decay`, KL-UCB with
 `--kl-ucb-c`. The generated `report.md` reports cumulative reward and
 regret per algorithm, per-arm selection fractions, and the seed used so
@@ -478,6 +480,42 @@ experiment = BanditExperiment(
 
 See `examples/run_demo.py` for a complete end-to-end demo and
 `tests/` for the unit-test contract.
+
+### EXP3.S (switching adversaries)
+
+`EXP3` competes with the single best arm in hindsight, so once one arm has
+dominated for a while its weight is astronomically larger than the rest and
+the policy cannot follow a change in which arm is best. `EXP3.S` (Auer,
+Cesa-Bianchi, Freund & Schapire 2002) adds a *fixed share* after each
+importance-weighted update:
+
+```
+w_i <- w_i * exp(gamma * x_hat_i / K) + (e * alpha / K) * W_t
+```
+
+where `W_t` is the total weight before the update. Every arm keeps a floor
+proportional to the total, so the policy re-allocates within a few dozen
+pulls after the best arm switches. `alpha = 0` recovers `EXP3` exactly.
+`exp3_s_parameters(n_arms, horizon, switches)` returns the paper's tuned
+`(gamma, alpha)` for a horizon `T` with at most `S` switches
+(`alpha = 1/T`).
+
+```python
+from bandit_kit import BanditExperiment, BernoulliArm, exp3_s_parameters
+
+gamma, alpha = exp3_s_parameters(n_arms=2, horizon=2000, switches=2)
+exp = BanditExperiment(
+    arms=[BernoulliArm("a", 0.3), BernoulliArm("b", 0.6)],
+    algorithms=["exp3_s", "exp3_ix", "exp3"],
+    steps=2000,
+    gamma=gamma,
+    exp3_s_alpha=alpha,
+)
+print(exp.summarize(exp.run()))
+```
+
+`exp3_ix` and `exp3_s` are both available in `BanditExperiment`,
+`ContextualBanditExperiment`, and `bandit-kit compare`.
 
 ### Best-arm identification (Successive Rejects, Sequential Halving, LUCB)
 

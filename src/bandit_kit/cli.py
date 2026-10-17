@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .arms import arm_from_spec, best_arm, make_linear_contextual_arms
-from .algorithms import boltzmann, discounted_ucb, epsilon_greedy, exp3, exp3_ix, imed, kl_ucb, moss, sliding_window_ucb, sliding_window_thompson, ucb1, ucb_tuned, ucb_v, ucb2, thompson_sampling_bernoulli, thompson_sampling_gaussian, tsallis_inf
+from .algorithms import boltzmann, discounted_ucb, epsilon_greedy, exp3, exp3_ix, exp3_s, imed, kl_ucb, moss, sliding_window_ucb, sliding_window_thompson, ucb1, ucb_tuned, ucb_v, ucb2, thompson_sampling_bernoulli, thompson_sampling_gaussian, tsallis_inf
 from .experiment import BanditExperiment, ContextualBanditExperiment
 from .reporting import render_contextual_markdown_report, render_markdown_report
 
@@ -21,6 +21,7 @@ ALGORITHMS = {
     "thompson_gaussian": thompson_sampling_gaussian,
     "exp3": exp3,
     "exp3_ix": exp3_ix,
+    "exp3_s": exp3_s,
     "boltzmann": boltzmann,
     "kl_ucb": kl_ucb,
     "imed": imed,
@@ -46,7 +47,19 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--steps", type=int, default=200, help="Number of pulls per run (default: 200)")
     compare.add_argument("--runs", type=int, default=20, help="Number of independent runs (default: 20)")
     compare.add_argument("--epsilon", type=float, default=0.1, help="epsilon-greedy exploration rate (default: 0.1)")
-    compare.add_argument("--gamma", type=float, default=0.1, help="EXP3 exploration mixing rate (default: 0.1)")
+    compare.add_argument("--gamma", type=float, default=0.1, help="EXP3 / EXP3.S exploration mixing rate (default: 0.1)")
+    compare.add_argument(
+        "--exp3-ix-eta",
+        type=float,
+        default=0.1,
+        help="EXP3-IX learning rate / implicit-exploration bias eta > 0 (default: 0.1)",
+    )
+    compare.add_argument(
+        "--exp3-s-alpha",
+        type=float,
+        default=0.01,
+        help="EXP3.S fixed-share switching rate alpha in [0, 1] (default: 0.01; 1/T is the tuned choice)",
+    )
     compare.add_argument(
         "--temperature-start",
         type=float,
@@ -375,6 +388,8 @@ def cmd_compare(args: argparse.Namespace) -> int:
             seed=args.seed,
             epsilon=args.epsilon,
             gamma=args.gamma,
+            exp3_ix_eta=args.exp3_ix_eta,
+            exp3_s_alpha=args.exp3_s_alpha,
             temperature_start=args.temperature_start,
             temperature_min=args.temperature_min,
             temperature_decay=args.temperature_decay,

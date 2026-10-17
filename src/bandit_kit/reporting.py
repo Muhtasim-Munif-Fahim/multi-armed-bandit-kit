@@ -40,6 +40,12 @@ def render_markdown_report(
         lines.append(f"- epsilon (epsilon-greedy): {experiment.epsilon}")
     if experiment.algorithms and "exp3" in experiment.algorithms:
         lines.append(f"- gamma (exp3): {experiment.gamma}")
+    if experiment.algorithms and "exp3_ix" in experiment.algorithms and hasattr(experiment, "exp3_ix_eta"):
+        lines.append(f"- eta (exp3_ix): {experiment.exp3_ix_eta}")
+    if experiment.algorithms and "exp3_s" in experiment.algorithms and hasattr(experiment, "exp3_s_alpha"):
+        lines.append(
+            f"- gamma / alpha (exp3_s): {experiment.gamma} / {experiment.exp3_s_alpha}"
+        )
     if experiment.algorithms and (
         "boltzmann" in experiment.algorithms or "softmax" in experiment.algorithms
     ):
@@ -118,6 +124,19 @@ def render_markdown_report(
                 "- exp3 (adversarial bandit) samples from a mixture of the exponential-weight "
                 f"distribution and the uniform distribution (gamma={experiment.gamma}); weights "
                 "are updated with importance-weighted rewards clipped to [0, 1]."
+            )
+        elif algo == "exp3_ix":
+            lines.append(
+                "- exp3_ix (EXP3 with implicit exploration, Neu 2015) biases the "
+                f"importance-weighted loss estimate by eta={getattr(experiment, 'exp3_ix_eta', 0.1)} "
+                "for high-probability regret guarantees."
+            )
+        elif algo == "exp3_s":
+            lines.append(
+                "- exp3_s (EXP3.S, Auer et al. 2002) adds a fixed share "
+                f"e*alpha/K of the total weight to every arm (gamma={experiment.gamma}, "
+                f"alpha={getattr(experiment, 'exp3_s_alpha', 0.01)}) so it can track a best arm "
+                "that switches over time."
             )
         elif algo == "linucb":
             lines.append(
