@@ -39,7 +39,7 @@ class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
-    :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`linucb`,
+    :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`exp3_ix`, :func:`exp3_s`, :func:`linucb`,
     :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`sliding_window_thompson`, :func:`discounted_ucb`, :func:`moss`, and :func:`tsallis_inf` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
@@ -491,6 +491,109 @@ class Exp3IX(BanditAlgorithm):
         if max_weight > 0.0:
             self._weights = [weight / max_weight for weight in self._weights]
         self._last_probabilities = []
+
+
+class Exp3S(BanditAlgorithm):
+    """EXP3.S for switching / non-stationary adversaries (Auer et al. 2002).
+
+    EXP3.S competes with the best *sequence* of arms that changes at most
+    ``S`` times, rather than with the single best arm in hindsight. It is
+    EXP3 plus a fixed-share step: after the importance-weighted update
+    every weight receives a share ``e * alpha / K`` of the total weight
+    ``W_t`` from before the update::
+
+        p_i   = (1 - gamma) * w_i / W_t + gamma / K
+        x̂_i  = reward / p_i  (played arm only, 0 otherwise)
+        w_i  <- w_i * exp(gamma * x̂_i / K) + (e * alpha / K) * W_t
+
+    The share keeps every arm's weight bounded away from zero, so the
+    policy can switch quickly when a previously bad arm becomes the best
+    one. ``alpha = 0`` recovers EXP3 exactly. Auer et al. suggest
+    ``alpha = 1 / T`` and ``gamma = min(1, sqrt(K (S ln(KT) + e) / ((e - 1) T)))``
+    for a horizon ``T`` with ``S`` switches; see :func:`exp3_s_parameters`.
+    Rewards are clipped to [0, 1].
+    """
+
+    def __init__(
+        self,
+        gamma: float = 0.1,
+        alpha: float = 0.01,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if not 0.0 < gamma <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be in [0, 1]")
+        self.gamma = float(gamma)
+        self.alpha = float(alpha)
+        self._weights: list[float] = []
+        self._last_probabilities: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._weights = [1.0] * len(arms)
+        self._last_probabilities = []
+
+    def _distribution(self) -> list[float]:
+        n = len(self._weights)
+        total = sum(self._weights)
+        return [
+            (1.0 - self.gamma) * (weight / total) + self.gamma / n
+            for weight in self._weights
+        ]
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        probabilities = self._distribution()
+        self._last_probabilities = probabilities
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        n = len(self._weights)
+        if len(self._last_probabilities) != n:
+            self._last_probabilities = self._distribution()
+        idx = step.arm_index
+        reward = min(1.0, max(0.0, float(step.reward)))
+        probability = self._last_probabilities[idx]
+        total_before = sum(self._weights)
+        share = math.e * self.alpha / n * total_before
+        estimated = reward / probability
+        new_weights = list(self._weights)
+        new_weights[idx] *= math.exp(self.gamma * estimated / n)
+        self._weights = [weight + share for weight in new_weights]
+        # The share term scales with W_t, so rescaling all weights by a
+        # common constant leaves the policy unchanged and avoids overflow.
+        max_weight = max(self._weights)
+        if max_weight > 0.0:
+            self._weights = [weight / max_weight for weight in self._weights]
+        self._last_probabilities = []
+
+
+def exp3_s_parameters(n_arms: int, horizon: int, switches: int = 1) -> tuple[float, float]:
+    """Return Auer et al.'s tuned ``(gamma, alpha)`` for EXP3.S.
+
+    ``alpha = 1 / T`` and
+    ``gamma = min(1, sqrt(K * (S * ln(K * T) + e) / ((e - 1) * T)))``
+    where ``K`` is the number of arms, ``T`` the horizon and ``S`` the
+    number of times the best arm is allowed to change (Auer, Cesa-Bianchi,
+    Freund & Schapire 2002, Corollary 8.3).
+    """
+    if isinstance(n_arms, bool) or not isinstance(n_arms, int) or n_arms < 1:
+        raise ValueError("n_arms must be an integer >= 1")
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
+        raise ValueError("horizon must be an integer >= 1")
+    if isinstance(switches, bool) or not isinstance(switches, int) or switches < 0:
+        raise ValueError("switches must be an integer >= 0")
+    k, t, s = float(n_arms), float(horizon), float(switches)
+    gamma = min(1.0, math.sqrt(k * (s * math.log(k * t) + math.e) / ((math.e - 1.0) * t)))
+    gamma = max(gamma, 1e-12)
+    return gamma, 1.0 / t
 
 
 class LinUCB(BanditAlgorithm):
@@ -1969,6 +2072,15 @@ def exp3_ix(
     return Exp3IX(eta=eta, gamma=gamma, seed=seed)
 
 
+def exp3_s(
+    gamma: float = 0.1,
+    alpha: float = 0.01,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    return Exp3S(gamma=gamma, alpha=alpha, seed=seed)
+
+
 def linucb(
     alpha: float = 1.0,
     dimension: int = 1,
@@ -2068,6 +2180,9 @@ __all__ = [
     "exp3",
     "exp3_ix",
     "Exp3IX",
+    "exp3_s",
+    "Exp3S",
+    "exp3_s_parameters",
     "Exp3",
     "linucb",
     "LinUCB",

@@ -16,6 +16,8 @@ from .algorithms import (
     decaying_epsilon_greedy,
     epsilon_greedy,
     exp3,
+    exp3_ix,
+    exp3_s,
     gradient_bandit,
     kl_ucb,
     imed,
@@ -54,6 +56,8 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "decaying_epsilon_greedy": decaying_epsilon_greedy,
     "gradient_bandit": gradient_bandit,
     "exp3": exp3,
+    "exp3_ix": exp3_ix,
+    "exp3_s": exp3_s,
     "linucb": linucb,
     "lints": lints,
     "boltzmann": boltzmann,
@@ -107,6 +111,8 @@ class BanditExperiment:
     seed: int = 42
     epsilon: float = 0.1
     gamma: float = 0.1
+    exp3_ix_eta: float = 0.1
+    exp3_s_alpha: float = 0.01
     linucb_alpha: float = 1.0
     linucb_ridge: float = 1.0
     temperature_start: float = 1.0
@@ -141,6 +147,10 @@ class BanditExperiment:
             raise ValueError("epsilon must be in [0, 1]")
         if not 0.0 < self.gamma <= 1.0:
             raise ValueError("gamma must be in (0, 1]")
+        if self.exp3_ix_eta <= 0.0:
+            raise ValueError("exp3_ix_eta must be positive")
+        if not 0.0 <= self.exp3_s_alpha <= 1.0:
+            raise ValueError("exp3_s_alpha must be in [0, 1]")
         if self.linucb_alpha < 0.0:
             raise ValueError("linucb_alpha must be non-negative")
         if self.linucb_ridge <= 0.0:
@@ -186,6 +196,10 @@ class BanditExperiment:
             return factory(epsilon=self.epsilon, seed=seed)
         if name == "exp3":
             return factory(gamma=self.gamma, seed=seed)
+        if name == "exp3_ix":
+            return factory(eta=self.exp3_ix_eta, seed=seed)
+        if name == "exp3_s":
+            return factory(gamma=self.gamma, alpha=self.exp3_s_alpha, seed=seed)
         if name == "linucb":
             # Stationary path: intercept-only ridge-UCB (context = [1.0]).
             return factory(
@@ -461,6 +475,8 @@ class ContextualBanditExperiment:
     seed: int = 42
     epsilon: float = 0.1
     gamma: float = 0.1
+    exp3_ix_eta: float = 0.1
+    exp3_s_alpha: float = 0.01
     linucb_alpha: float = 1.0
     linucb_ridge: float = 1.0
     temperature_start: float = 1.0
@@ -495,6 +511,10 @@ class ContextualBanditExperiment:
             raise ValueError("epsilon must be in [0, 1]")
         if not 0.0 < self.gamma <= 1.0:
             raise ValueError("gamma must be in (0, 1]")
+        if self.exp3_ix_eta <= 0.0:
+            raise ValueError("exp3_ix_eta must be positive")
+        if not 0.0 <= self.exp3_s_alpha <= 1.0:
+            raise ValueError("exp3_s_alpha must be in [0, 1]")
         if self.linucb_alpha < 0.0:
             raise ValueError("linucb_alpha must be non-negative")
         if self.linucb_ridge <= 0.0:
@@ -532,6 +552,10 @@ class ContextualBanditExperiment:
             return factory(epsilon=self.epsilon, seed=seed)
         if name == "exp3":
             return factory(gamma=self.gamma, seed=seed)
+        if name == "exp3_ix":
+            return factory(eta=self.exp3_ix_eta, seed=seed)
+        if name == "exp3_s":
+            return factory(gamma=self.gamma, alpha=self.exp3_s_alpha, seed=seed)
         if name == "linucb":
             return factory(
                 alpha=self.linucb_alpha,
