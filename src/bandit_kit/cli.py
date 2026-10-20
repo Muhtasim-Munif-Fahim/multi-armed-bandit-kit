@@ -127,6 +127,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _build_best_parser(sub)
     _build_identify_parser(sub)
+    _build_offpolicy_parser(sub)
     _build_contextual_parser(sub)
     return parser
 
@@ -210,6 +211,95 @@ def cmd_identify(args: argparse.Namespace) -> int:
         if args.runs:
             rate = payload["error_rate"]
             print(f"misidentification rate over {args.runs} runs: {rate['error_rate']:.3f}")
+    return 0
+
+
+def _parse_probabilities(text: str, n_arms: int) -> list[float]:
+    values = [float(v) for v in text.split(",") if v.strip()]
+    if len(values) != n_arms:
+        raise ValueError(f"expected {n_arms} probabilities, got {len(values)}")
+    return values
+
+
+def _build_offpolicy_parser(sub) -> None:
+    ope = sub.add_parser(
+        "offpolicy",
+        help="Off-policy evaluation: IPS / SNIPS / DM / DR estimates of a target policy from simulated logs",
+    )
+    ope.add_argument("--arms", required=True, help="Comma-separated arm specs, e.g. 'bern:0.3,bern:0.5,bern:0.7'")
+    ope.add_argument(
+        "--target", required=True,
+        help="Target policy: an arm index (deterministic) or comma-separated probabilities",
+    )
+    ope.add_argument(
+        "--logging", default=None,
+        help="Logging policy probabilities (default: uniform)",
+    )
+    ope.add_argument("--n", type=int, default=5000, help="Number of logged events (default: 5000)")
+    ope.add_argument("--clip", type=float, default=None, help="Also report weight-clipped IPS at this cap")
+    ope.add_argument(
+        "--replay", default=None, choices=sorted(ALGORITHMS),
+        help="Also replay this learning algorithm on the logs (requires uniform logging)",
+    )
+    ope.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    ope.add_argument("--json", action="store_true", help="Print JSON")
+
+
+def cmd_offpolicy(args: argparse.Namespace) -> int:
+    """Simulate logged data and estimate a target policy's value off-policy."""
+    from .arms import BernoulliArm, GaussianArm
+    from .offpolicy import collect_logs, evaluate_policy, replay_evaluate, true_policy_value
+
+    try:
+        arms = []
+        for i, spec in enumerate(s for s in args.arms.split(",") if s.strip()):
+            arm = arm_from_spec(spec)
+            if isinstance(arm, BernoulliArm):
+                arm = BernoulliArm(arm.name, arm.p, seed=args.seed + i)
+            elif isinstance(arm, GaussianArm):
+                arm = GaussianArm(arm.name, arm.mean, arm.std, seed=args.seed + i)
+            arms.append(arm)
+        if not arms:
+            raise ValueError("at least one arm spec is required")
+        target = int(args.target) if "," not in args.target else _parse_probabilities(args.target, len(arms))
+        logging_policy = None if args.logging is None else _parse_probabilities(args.logging, len(arms))
+        logs = collect_logs(arms, args.n, logging_policy, seed=args.seed + 10_000)
+        estimates = evaluate_policy(logs, target, n_arms=len(arms), clip=args.clip)
+        payload = {
+            "true_value": true_policy_value(arms, target),
+            "n_logged": len(logs),
+            "estimates": {name: est.as_dict() for name, est in estimates.items()},
+        }
+        if args.replay:
+            algo = ALGORITHMS[args.replay](seed=args.seed)
+            replay = replay_evaluate(algo, arms, logs)
+            payload["replay"] = {
+                "algorithm": args.replay,
+                "mean_reward": replay.mean_reward,
+                "n_matched": replay.n_matched,
+                "match_rate": replay.match_rate,
+                "arm_counts": replay.arm_counts,
+            }
+    except (ValueError, TypeError) as exc:
+        print(f"offpolicy: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(f"true target value: {payload['true_value']:.4f}  (logged events: {payload['n_logged']})")
+    for name, est in payload["estimates"].items():
+        ess = est["effective_sample_size"]
+        ess_text = f"  ESS={ess:.0f}" if ess is not None else ""
+        print(
+            f"  {name:>11}: {est['value']:.4f}  se={est['std_error']:.4f}  "
+            f"95% CI [{est['ci_low']:.4f}, {est['ci_high']:.4f}]{ess_text}"
+        )
+    if args.replay:
+        rep = payload["replay"]
+        print(
+            f"replay {rep['algorithm']}: mean reward {rep['mean_reward']:.4f} over "
+            f"{rep['n_matched']} matched events (match rate {rep['match_rate']:.3f})"
+        )
     return 0
 
 
@@ -431,6 +521,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_best(args)
     if args.command == "identify":
         return cmd_identify(args)
+    if args.command == "offpolicy":
+        return cmd_offpolicy(args)
     if args.command == "compare-contextual":
         return cmd_compare_contextual(args)
     parser.error(f"unknown command: {args.command}")

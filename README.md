@@ -542,3 +542,34 @@ print(lucb(easy, delta=0.05).total_pulls)  # stops as soon as the gap is resolve
 bandit-kit identify --arms bern:0.5,bern:0.45,bern:0.4 --method sr --budget 3000 --runs 200
 bandit-kit identify --arms bern:0.8,bern:0.3 --method lucb --delta 0.05 --json
 ```
+
+### Off-policy evaluation (IPS, SNIPS, DM, DR, replay)
+
+Estimate how a *new* policy would perform from logs collected by the deployed one, without deploying it. Each logged event records the arm played, its reward, and the logging policy's propensity for that arm (`LoggedEvent(arm_index, reward, propensity, context=None)`).
+
+- `ips_estimate(logs, target, clip=None)`: inverse propensity scoring `mean(w r)` with `w = pi(a)/mu(a)`. It is unbiased under full support. `clip` caps the weights, trading some downward bias for lower variance.
+- `snips_estimate`: self-normalised IPS `sum(w r) / sum(w)` with a delta-method standard error. It is usually far more stable when the weights are heavy-tailed.
+- `direct_method_estimate(logs, target, reward_model=None)`: model-based plug-in. The default model is the per-arm empirical mean. It is biased if the model is wrong.
+- `doubly_robust_estimate`: DM plus an IPS correction of the model residual. It is unbiased if either the propensities or the model are right.
+- `evaluate_policy(...)`: runs all four estimators, plus clipped IPS when `clip` is given. Every result reports a standard error, a normal CI, and the Kish effective sample size `(sum w)^2 / sum w^2`.
+- `replay_evaluate(algorithm, arms, logs)`: the replay method (Li et al., 2011) for *learning* algorithms under uniformly random logging. The algorithm only sees, and learns from, the events where it agrees with the logged arm. The matched rewards are an unbiased sample of its online run.
+- `collect_logs(arms, n, logging_policy=None)` simulates logged data, and `true_policy_value(arms, policy)` gives the ground truth.
+
+Policies are an arm index (deterministic), a list of probabilities, or `policy(context) -> probabilities`.
+
+```python
+from bandit_kit import BernoulliArm, collect_logs, evaluate_policy, replay_evaluate, ucb1
+
+arms = [BernoulliArm(f"a{i}", p, seed=i) for i, p in enumerate([0.3, 0.5, 0.7])]
+logs = collect_logs(arms, 5000, logging_policy=[0.6, 0.3, 0.1], seed=1)
+for name, est in evaluate_policy(logs, target=[0.1, 0.1, 0.8], clip=10).items():
+    print(name, round(est.value, 4), (round(est.ci_low, 3), round(est.ci_high, 3)))
+
+uniform = collect_logs(arms, 6000, seed=2)
+print(replay_evaluate(ucb1(seed=0), arms, uniform).mean_reward)
+```
+
+```bash
+bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 0.1,0.1,0.8 --logging 0.6,0.3,0.1 --n 5000
+bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 2 --clip 5 --replay ucb1 --json
+```
