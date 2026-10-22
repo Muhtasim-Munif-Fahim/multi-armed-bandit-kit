@@ -125,3 +125,12 @@ def test_cli_identify_new_methods(capsys):
     assert "method: lil_ucb" in capsys.readouterr().out
     assert main(["identify", "--arms", "gauss:1:1,gauss:0:1", "--method", "ttts",
                  "--model", "gaussian"]) == 0
+
+
+def test_cli_identify_error_rate_with_seeded_method(capsys):
+    argv = ["identify", "--arms", "bern:0.7,bern:0.3", "--method", "t3c", "--runs", "5", "--json"]
+    assert main(argv) == 0
+    first = json.loads(capsys.readouterr().out)["error_rate"]
+    assert main(argv) == 0
+    second = json.loads(capsys.readouterr().out)["error_rate"]
+    assert first == second and first["n_runs"] == 5.0
