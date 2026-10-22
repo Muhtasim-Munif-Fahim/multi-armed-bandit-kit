@@ -210,8 +210,20 @@ def cmd_identify(args: argparse.Namespace) -> int:
             "empirical_means": result.empirical_means,
         }
         if args.runs:
+            rate_kwargs = dict(kwargs)
+            rate_method = method
+            if "seed" in rate_kwargs:
+                # Seeded policies (Top-Two TS) get a distinct, reproducible seed per run.
+                import itertools
+
+                base_seed = rate_kwargs.pop("seed")
+                counter = itertools.count(1)
+
+                def rate_method(run_arms, **kw):
+                    return method(run_arms, seed=base_seed + next(counter), **kw)
+
             payload["error_rate"] = identification_error_rate(
-                method, arms, n_runs=args.runs, seed=args.seed + 1000, **kwargs
+                rate_method, arms, n_runs=args.runs, seed=args.seed + 1000, **rate_kwargs
             )
     except ValueError as exc:
         print(f"identify: {exc}", file=sys.stderr)
