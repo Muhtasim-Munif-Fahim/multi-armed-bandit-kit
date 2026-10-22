@@ -26,6 +26,20 @@ aim: find the arm with the highest mean, and stop. A typical use is a
     challenger's upper bound minus ``epsilon``. The confidence radius is
     Hoeffding's, scaled to each arm's ``reward_range``.
 
+  - :func:`top_two_thompson` (Russo, COLT 2016 / Operations Research 2020)
+    samples from the posterior, plays the sampled best arm with probability
+    ``beta`` and otherwise a *challenger*: either a resampled second best
+    (TTTS) or the arm with the smallest transportation cost to the leader
+    (T3C; Shang et al., AISTATS 2020). It stops with the Chernoff
+    generalized-likelihood-ratio rule of Garivier & Kaufmann (COLT 2016):
+    ``min_j Z_{leader,j}(t) > log(2 t (K - 1) / delta)`` (Bernoulli or
+    Gaussian KL), and its sample complexity approaches the
+    ``beta``-optimal lower bound.
+  - :func:`lil_ucb` (Jamieson, Malloy, Nowak & Bubeck, COLT 2014) pulls the
+    arm with the largest law-of-the-iterated-logarithm UCB and stops once one
+    arm has received ``1 + lambda`` times as many pulls as all others
+    combined.
+
 :func:`identification_error_rate` estimates the probability that any of
 these methods misidentifies the best arm by rerunning it on freshly seeded
 copies of Bernoulli or Gaussian arms.
@@ -42,7 +56,10 @@ from .arms import Arm, BernoulliArm, GaussianArm, best_arm
 __all__ = [
     "BestArmResult",
     "identification_error_rate",
+    "chernoff_glr_statistic",
+    "lil_ucb",
     "lucb",
+    "top_two_thompson",
     "successive_halving",
     "successive_rejects",
     "successive_rejects_schedule",
@@ -235,6 +252,232 @@ def lucb(
         total_pulls=tally.total,
         pulls=dict(tally.n),
         empirical_means=means,
+        stopped=stopped,
+    )
+
+
+def _kl_bernoulli(p: float, q: float, eps: float = 1e-15) -> float:
+    p = min(max(p, eps), 1.0 - eps)
+    q = min(max(q, eps), 1.0 - eps)
+    return p * math.log(p / q) + (1.0 - p) * math.log((1.0 - p) / (1.0 - q))
+
+
+def chernoff_glr_statistic(
+    mean_a: float,
+    n_a: int,
+    mean_b: float,
+    n_b: int,
+    model: str = "bernoulli",
+    sigma: float = 1.0,
+) -> float:
+    """Generalized likelihood ratio ``Z_{a,b}`` for "mean_a > mean_b" (Garivier & Kaufmann).
+
+    With the pooled mean ``m = (n_a mu_a + n_b mu_b) / (n_a + n_b)``:
+    ``Z = n_a d(mu_a, m) + n_b d(mu_b, m)`` if ``mu_a >= mu_b`` (else 0),
+    where ``d`` is the Bernoulli KL (means in ``[0, 1]``) or the Gaussian KL
+    ``(x - y)^2 / (2 sigma^2)``. Equivalently, for Gaussians,
+    ``Z = (mu_a - mu_b)^2 / (2 sigma^2 (1/n_a + 1/n_b))``.
+    """
+    if n_a <= 0 or n_b <= 0:
+        return 0.0
+    if mean_a < mean_b:
+        return 0.0
+    if model == "gaussian":
+        return (mean_a - mean_b) ** 2 / (2.0 * sigma ** 2 * (1.0 / n_a + 1.0 / n_b))
+    if model != "bernoulli":
+        raise ValueError("model must be 'bernoulli' or 'gaussian'")
+    m = (n_a * mean_a + n_b * mean_b) / (n_a + n_b)
+    return n_a * _kl_bernoulli(mean_a, m) + n_b * _kl_bernoulli(mean_b, m)
+
+
+def top_two_thompson(
+    arms: Sequence[Arm],
+    delta: float = 0.05,
+    beta: float = 0.5,
+    model: str = "bernoulli",
+    challenger: str = "t3c",
+    sigma: float | None = None,
+    max_pulls: int = 100_000,
+    seed: int | None = None,
+    max_resamples: int = 50,
+) -> BestArmResult:
+    """Fixed-confidence Top-Two Thompson Sampling with Chernoff GLR stopping.
+
+    ``model="bernoulli"`` rescales rewards to ``[0, 1]`` with each arm's
+    ``reward_range`` and uses ``Beta(1 + S, 1 + N - S)`` posteriors (exact
+    for 0/1 rewards; the binomial KL is still a valid sub-Bernoulli bound
+    for bounded rewards). ``model="gaussian"`` uses a flat-prior
+    ``N(mean, sigma^2 / n)`` posterior with known ``sigma`` (default: half
+    the widest ``reward_range``, or 1 for unbounded arms).
+
+    ``challenger="ttts"`` resamples the posterior until a different arm is
+    the argmax (at most ``max_resamples`` times, falling back to T3C);
+    ``challenger="t3c"`` picks ``argmin_{j != I} Z_{I,j}``.
+    """
+    import random as _random
+
+    arms = _check_arms(arms)
+    if not 0.0 < delta < 1.0:
+        raise ValueError("delta must be in (0, 1)")
+    if not 0.0 < beta < 1.0:
+        raise ValueError("beta must be in (0, 1)")
+    if model not in ("bernoulli", "gaussian"):
+        raise ValueError("model must be 'bernoulli' or 'gaussian'")
+    if challenger not in ("t3c", "ttts"):
+        raise ValueError("challenger must be 't3c' or 'ttts'")
+    k = len(arms)
+    if isinstance(max_pulls, bool) or not isinstance(max_pulls, int) or max_pulls < k:
+        raise ValueError("max_pulls must be an integer >= number of arms")
+    rng = _random.Random(seed)
+    names = [arm.name for arm in arms]
+    lo = {arm.name: float(arm.reward_range[0]) for arm in arms}
+    width = {arm.name: float(arm.reward_range[1] - arm.reward_range[0]) for arm in arms}
+    if model == "bernoulli":
+        for arm in arms:
+            if not math.isfinite(width[arm.name]) or width[arm.name] <= 0:
+                raise ValueError("model='bernoulli' needs arms with a finite, non-degenerate reward_range")
+    if sigma is None:
+        finite = [w for w in width.values() if math.isfinite(w) and w > 0]
+        sigma = max(finite) / 2.0 if finite else 1.0
+    if sigma <= 0:
+        raise ValueError("sigma must be positive")
+    tally = _Tally(arms)
+    succ = {name: 0.0 for name in names}  # rescaled reward sums (bernoulli)
+
+    def pull(name: str) -> None:
+        r = tally.pull(name)
+        if model == "bernoulli":
+            succ[name] += min(max((r - lo[name]) / width[name], 0.0), 1.0)
+
+    def stat_mean(name: str) -> float:
+        if model == "bernoulli":
+            return succ[name] / tally.n[name]
+        return tally.mean(name)
+
+    def sample(name: str) -> float:
+        if model == "bernoulli":
+            return rng.betavariate(1.0 + succ[name], 1.0 + tally.n[name] - succ[name])
+        return rng.gauss(tally.mean(name), sigma / math.sqrt(tally.n[name]))
+
+    def z(a: str, b: str) -> float:
+        return chernoff_glr_statistic(stat_mean(a), tally.n[a], stat_mean(b), tally.n[b], model, sigma)
+
+    for name in names:
+        pull(name)
+    stopped = False
+    while True:
+        t = tally.total
+        means = {n: stat_mean(n) for n in names}
+        leader = max(names, key=lambda n: (means[n], -names.index(n)))
+        threshold = math.log(2.0 * t * (k - 1) / delta)
+        if min(z(leader, j) for j in names if j != leader) > threshold:
+            stopped = True
+            break
+        if t + 1 > max_pulls:
+            break
+        draws = {n: sample(n) for n in names}
+        first = max(names, key=lambda n: draws[n])
+        if rng.random() < beta:
+            pull(first)
+            continue
+        second = None
+        if challenger == "ttts":
+            for _ in range(max_resamples):
+                again = {n: sample(n) for n in names}
+                cand = max(names, key=lambda n: again[n])
+                if cand != first:
+                    second = cand
+                    break
+        if second is None:
+            second = min((j for j in names if j != first),
+                         key=lambda j: (z(first, j), names.index(j)))
+        pull(second)
+    means = tally.means()
+    stat = {n: stat_mean(n) for n in names}
+    leader = max(names, key=lambda n: (stat[n], -names.index(n)))
+    return BestArmResult(
+        method=f"top_two_thompson[{challenger}]",
+        recommended=leader,
+        total_pulls=tally.total,
+        pulls=dict(tally.n),
+        empirical_means=means,
+        stopped=stopped,
+    )
+
+
+def lil_ucb(
+    arms: Sequence[Arm],
+    delta: float = 0.05,
+    epsilon: float = 0.01,
+    beta: float = 1.0,
+    lam: float | None = None,
+    sigma: float | None = None,
+    max_pulls: int = 1_000_000,
+) -> BestArmResult:
+    """Fixed-confidence lil'UCB (Jamieson et al., 2014).
+
+    Pulls ``argmax_i mu_i + (1 + beta)(1 + sqrt(epsilon)) *
+    sqrt(2 sigma^2 (1 + epsilon) log(log((1 + epsilon) n_i + 2) / delta) / n_i)``
+    (the ``+ 2`` keeps the iterated logarithm positive for small ``n_i``, as in
+    the authors' experiments)
+    and stops when some arm satisfies ``n_i >= 1 + lam * sum_{j != i} n_j``;
+    that arm is recommended. ``lam`` defaults to the theoretical
+    ``((2 + beta) / beta)^2`` (9 for ``beta = 1``). ``sigma`` is the
+    sub-Gaussian scale (default: half the widest ``reward_range``). The
+    paper's guarantee holds for ``delta < log(1 + epsilon) / e`` after the
+    ``delta`` rescaling of its Theorem 2; larger ``delta`` values give the
+    widely used heuristic variant.
+    """
+    arms = _check_arms(arms)
+    if not 0.0 < delta < 1.0:
+        raise ValueError("delta must be in (0, 1)")
+    if not 0.0 < epsilon < 1.0:
+        raise ValueError("epsilon must be in (0, 1)")
+    if beta <= 0:
+        raise ValueError("beta must be positive")
+    k = len(arms)
+    if isinstance(max_pulls, bool) or not isinstance(max_pulls, int) or max_pulls < k:
+        raise ValueError("max_pulls must be an integer >= number of arms")
+    if lam is None:
+        lam = ((2.0 + beta) / beta) ** 2
+    if lam <= 0:
+        raise ValueError("lam must be positive")
+    if sigma is None:
+        finite = [float(a.reward_range[1] - a.reward_range[0]) for a in arms]
+        finite = [w for w in finite if math.isfinite(w) and w > 0]
+        sigma = max(finite) / 2.0 if finite else 1.0
+    names = [arm.name for arm in arms]
+    tally = _Tally(arms)
+    for name in names:
+        tally.pull(name)
+    scale = (1.0 + beta) * (1.0 + math.sqrt(epsilon))
+
+    def index(name: str) -> float:
+        n = tally.n[name]
+        inner = math.log((1.0 + epsilon) * n + 2.0)
+        bonus = math.sqrt(2.0 * sigma ** 2 * (1.0 + epsilon) * math.log(inner / delta) / n)
+        return tally.mean(name) + scale * bonus
+
+    stopped = False
+    winner = None
+    while True:
+        total = tally.total
+        for name in names:
+            if tally.n[name] >= 1.0 + lam * (total - tally.n[name]):
+                winner = name
+                stopped = True
+                break
+        if stopped or total + 1 > max_pulls:
+            break
+        tally.pull(max(names, key=lambda n: (index(n), -names.index(n))))
+    if winner is None:
+        winner = max(names, key=lambda n: (tally.n[n], tally.mean(n)))
+    return BestArmResult(
+        method="lil_ucb",
+        recommended=winner,
+        total_pulls=tally.total,
+        pulls=dict(tally.n),
+        empirical_means=tally.means(),
         stopped=stopped,
     )
 

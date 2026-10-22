@@ -2,8 +2,11 @@
 
 from .identification import (
     BestArmResult,
+    chernoff_glr_statistic,
     identification_error_rate,
+    lil_ucb,
     lucb,
+    top_two_thompson,
     successive_halving,
     successive_rejects,
     successive_rejects_schedule,
@@ -122,6 +125,9 @@ from .visualization import (
 __all__ = [
     "BestArmResult",
     "identification_error_rate",
+    "chernoff_glr_statistic",
+    "lil_ucb",
+    "top_two_thompson",
     "lucb",
     "successive_halving",
     "successive_rejects",
