@@ -135,18 +135,23 @@ def _build_parser() -> argparse.ArgumentParser:
 def _build_identify_parser(sub) -> None:
     identify = sub.add_parser(
         "identify",
-        help="Best-arm identification: Successive Rejects, Sequential Halving, or LUCB",
+        help="Best-arm identification: Successive Rejects, Sequential Halving, LUCB, Top-Two TS, or lil'UCB",
     )
     identify.add_argument(
         "--arms", required=True,
         help="Comma-separated arm specs, e.g. 'bern:0.5,bern:0.45,bern:0.4'",
     )
     identify.add_argument(
-        "--method", choices=["sr", "sh", "lucb"], default="sr",
-        help="sr = Successive Rejects, sh = Sequential Halving (fixed budget); lucb = LUCB1 (fixed confidence)",
+        "--method", choices=["sr", "sh", "lucb", "t3c", "ttts", "lil"], default="sr",
+        help=("sr = Successive Rejects, sh = Sequential Halving (fixed budget); lucb = LUCB1, "
+              "t3c / ttts = Top-Two Thompson Sampling with Chernoff stopping, lil = lil'UCB (fixed confidence)"),
     )
+    identify.add_argument("--beta", type=float, default=0.5,
+                          help="Top-two leader probability for t3c / ttts (default: 0.5)")
+    identify.add_argument("--model", choices=["bernoulli", "gaussian"], default="bernoulli",
+                          help="Posterior / GLR model for t3c / ttts (default: bernoulli)")
     identify.add_argument("--budget", type=int, default=2000, help="Pull budget for sr / sh (default: 2000)")
-    identify.add_argument("--delta", type=float, default=0.05, help="LUCB error probability (default: 0.05)")
+    identify.add_argument("--delta", type=float, default=0.05, help="Fixed-confidence error probability (default: 0.05)")
     identify.add_argument("--epsilon", type=float, default=0.0, help="LUCB slack (default: 0)")
     identify.add_argument("--max-pulls", type=int, default=100_000, help="LUCB pull cap (default: 100000)")
     identify.add_argument(
@@ -162,9 +167,11 @@ def cmd_identify(args: argparse.Namespace) -> int:
     from .arms import BernoulliArm, GaussianArm
     from .identification import (
         identification_error_rate,
+        lil_ucb,
         lucb,
         successive_halving,
         successive_rejects,
+        top_two_thompson,
     )
 
     try:
@@ -179,6 +186,15 @@ def cmd_identify(args: argparse.Namespace) -> int:
             arms.append(arm)
         if args.method == "lucb":
             method, kwargs = lucb, {"delta": args.delta, "epsilon": args.epsilon, "max_pulls": args.max_pulls}
+        elif args.method in ("t3c", "ttts"):
+            method = top_two_thompson
+            kwargs = {"delta": args.delta, "beta": args.beta, "model": args.model,
+                      "challenger": args.method, "max_pulls": args.max_pulls, "seed": args.seed}
+            stds = [arm.std for arm in arms if isinstance(arm, GaussianArm)]
+            if args.model == "gaussian" and stds:
+                kwargs["sigma"] = max(stds)
+        elif args.method == "lil":
+            method, kwargs = lil_ucb, {"delta": args.delta, "max_pulls": args.max_pulls}
         else:
             method = successive_rejects if args.method == "sr" else successive_halving
             kwargs = {"budget": args.budget}
