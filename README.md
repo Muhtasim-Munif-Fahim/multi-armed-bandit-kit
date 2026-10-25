@@ -579,3 +579,30 @@ print(replay_evaluate(ucb1(seed=0), arms, uniform).mean_reward)
 bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 0.1,0.1,0.8 --logging 0.6,0.3,0.1 --n 5000
 bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 2 --clip 5 --replay ucb1 --json
 ```
+
+## Dueling bandits (pairwise preferences)
+
+When feedback is relative — interleaved ranker clicks, "which response is
+better?" ratings — `bandit_kit.dueling` learns from duels. A
+`PreferenceMatrix` holds `P[i][j] = P(i beats j)` (build one directly or with
+`PreferenceMatrix.from_utilities(u, link="logistic")`, i.e. Bradley–Terry).
+Regret is measured against the **Condorcet winner**: strong regret
+`(eps_i + eps_j)/2` and weak regret `min(eps_i, eps_j)` per duel, with
+`eps_i = P[c][i] - 1/2`.
+
+- `RUCB` — Relative Upper Confidence Bound (Zoghi et al., 2014).
+- `DoubleThompsonSampling` — D-TS (Wu & Liu, 2016).
+- `UniformDueling` — random-pair baseline.
+- `condorcet_winner`, `copeland_winners`, `run_dueling`, `compare_dueling`.
+
+```python
+from bandit_kit import DoubleThompsonSampling, PreferenceMatrix, run_dueling
+
+env = PreferenceMatrix.from_utilities([0.0, 0.3, 0.6, 1.0, 0.8], seed=1)
+res = run_dueling(DoubleThompsonSampling(seed=0), env, horizon=2000)
+print(res.recommendation, res.cumulative_strong_regret, res.cumulative_weak_regret)
+```
+
+```bash
+bandit-kit duel --utilities 0,0.3,0.6,1.0,0.8 --horizon 2000 --runs 10
+```

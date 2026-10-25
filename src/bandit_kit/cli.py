@@ -128,6 +128,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_best_parser(sub)
     _build_identify_parser(sub)
     _build_offpolicy_parser(sub)
+    _build_duel_parser(sub)
     _build_contextual_parser(sub)
     return parser
 
@@ -540,6 +541,50 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_duel_parser(sub) -> None:
+    duel = sub.add_parser(
+        "duel",
+        help="Dueling bandits (RUCB, Double Thompson Sampling) on pairwise preferences",
+    )
+    duel.add_argument("--utilities", required=True,
+                      help="Comma-separated arm utilities; preferences via the --link model")
+    duel.add_argument("--link", choices=["logistic", "linear"], default="logistic",
+                      help="Utility-to-preference link (default: logistic / Bradley-Terry)")
+    duel.add_argument("--scale", type=float, default=1.0, help="Link scale (default: 1.0)")
+    duel.add_argument("--horizon", type=int, default=1000, help="Duels per run (default: 1000)")
+    duel.add_argument("--runs", type=int, default=10, help="Independent runs (default: 10)")
+    duel.add_argument("--alpha", type=float, default=0.51, help="Confidence exponent > 0.5 (default: 0.51)")
+    duel.add_argument("--policies", default="rucb,dts,uniform", help="Comma-separated policies")
+    duel.add_argument("--seed", type=int, default=0, help="Base random seed (default: 0)")
+    duel.add_argument("--json", action="store_true", help="Print JSON instead of a table")
+
+
+def cmd_duel(args: argparse.Namespace) -> int:
+    from .dueling import PreferenceMatrix, compare_dueling, condorcet_winner
+
+    try:
+        utilities = [float(v) for v in args.utilities.split(",") if v.strip()]
+        probs = PreferenceMatrix.from_utilities(utilities, link=args.link, scale=args.scale).probs
+        if args.horizon <= 0 or args.runs <= 0:
+            raise ValueError("--horizon and --runs must be positive")
+        policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+        table = compare_dueling(probs, horizon=args.horizon, runs=args.runs, policies=policies,
+                                alpha=args.alpha, seed=args.seed)
+    except ValueError as exc:
+        print(f"duel: {exc}", file=sys.stderr)
+        return 2
+    winner = condorcet_winner(probs)
+    if args.json:
+        print(json.dumps({"condorcet_winner": winner, "results": table}, indent=2))
+        return 0
+    print(f"Condorcet winner: arm {winner}  horizon: {args.horizon}  runs: {args.runs}")
+    print(f"{'policy':<10} {'strong regret':>14} {'weak regret':>12} {'winner found':>13}")
+    for name, row in table.items():
+        print(f"{name:<10} {row['strong_regret']:>14.2f} {row['weak_regret']:>12.2f} "
+              f"{row['winner_rate']:>12.0%}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -553,5 +598,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_offpolicy(args)
     if args.command == "compare-contextual":
         return cmd_compare_contextual(args)
+    if args.command == "duel":
+        return cmd_duel(args)
     parser.error(f"unknown command: {args.command}")
     return 2
