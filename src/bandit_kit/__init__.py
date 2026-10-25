@@ -1,5 +1,17 @@
 """Multi-armed bandit algorithms, experiments, and reporting."""
 
+from .dueling import (
+    DoubleThompsonSampling,
+    DuelingPolicy,
+    DuelingResult,
+    PreferenceMatrix,
+    RUCB,
+    UniformDueling,
+    compare_dueling,
+    condorcet_winner,
+    copeland_winners,
+    run_dueling,
+)
 from .identification import (
     BestArmResult,
     chernoff_glr_statistic,
@@ -123,6 +135,16 @@ from .visualization import (
 )
 
 __all__ = [
+    "DoubleThompsonSampling",
+    "DuelingPolicy",
+    "DuelingResult",
+    "PreferenceMatrix",
+    "RUCB",
+    "UniformDueling",
+    "compare_dueling",
+    "condorcet_winner",
+    "copeland_winners",
+    "run_dueling",
     "BestArmResult",
     "identification_error_rate",
     "chernoff_glr_statistic",
