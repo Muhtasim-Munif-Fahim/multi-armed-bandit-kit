@@ -129,6 +129,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_identify_parser(sub)
     _build_offpolicy_parser(sub)
     _build_duel_parser(sub)
+    _build_piecewise_parser(sub)
     _build_contextual_parser(sub)
     return parser
 
@@ -585,6 +586,56 @@ def cmd_duel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_piecewise_parser(sub) -> None:
+    pw = sub.add_parser(
+        "piecewise",
+        help="Piecewise-stationary Bernoulli arms: CUSUM-UCB / M-UCB vs SW-UCB / D-UCB / UCB1",
+    )
+    pw.add_argument("--means", required=True,
+                    help="Segments separated by ';', arm means by ',' (e.g. '0.9,0.5;0.2,0.8')")
+    pw.add_argument("--breakpoints", required=True, help="Comma-separated change steps (one fewer than segments)")
+    pw.add_argument("--horizon", type=int, default=3000, help="Rounds per run (default: 3000)")
+    pw.add_argument("--runs", type=int, default=10, help="Independent runs (default: 10)")
+    pw.add_argument("--policies", default="cusum_ucb,m_ucb,sliding_window_ucb,discounted_ucb,ucb1",
+                    help="Comma-separated policies")
+    pw.add_argument("--h", type=float, default=8.0, help="CUSUM-UCB alarm threshold (default: 8)")
+    pw.add_argument("--eps", type=float, default=0.05, help="CUSUM-UCB drift allowance (default: 0.05)")
+    pw.add_argument("--w", type=int, default=100, help="M-UCB window, even (default: 100)")
+    pw.add_argument("--b", type=float, default=None, help="M-UCB threshold (default: sqrt(w/2 log(2KT^2)))")
+    pw.add_argument("--window", type=int, default=200, help="SW-UCB window (default: 200)")
+    pw.add_argument("--discount", type=float, default=0.99, help="D-UCB discount (default: 0.99)")
+    pw.add_argument("--seed", type=int, default=0, help="Base random seed (default: 0)")
+    pw.add_argument("--json", action="store_true", help="Print JSON instead of a table")
+
+
+def cmd_piecewise(args: argparse.Namespace) -> int:
+    from .changepoint import compare_piecewise
+
+    try:
+        means = [[float(v) for v in seg.split(",") if v.strip()] for seg in args.means.split(";") if seg.strip()]
+        bps = [int(v) for v in args.breakpoints.split(",") if v.strip()]
+        if args.horizon <= 0 or args.runs <= 0:
+            raise ValueError("--horizon and --runs must be positive")
+        policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+        table = compare_piecewise(
+            means, bps, horizon=args.horizon, runs=args.runs, policies=policies, seed=args.seed,
+            h=args.h, eps=args.eps, w=args.w, b=args.b, window=args.window, discount=args.discount,
+        )
+    except ValueError as exc:
+        print(f"piecewise: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(table, indent=2))
+        return 0
+    print(f"segments: {len(means)}  breakpoints: {bps}  horizon: {args.horizon}  runs: {args.runs}")
+    print(f"{'policy':<20} {'dyn. regret':>12} {'alarms':>8} {'detected':>9} {'delay':>8}")
+    for name, row in table.items():
+        delay = "-" if row["mean_delay"] != row["mean_delay"] else f"{row['mean_delay']:.1f}"
+        print(f"{name:<20} {row['dynamic_regret']:>12.2f} {row['alarms']:>8.1f} "
+              f"{row['detection_rate']:>8.0%} {delay:>8}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -600,5 +651,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compare_contextual(args)
     if args.command == "duel":
         return cmd_duel(args)
+    if args.command == "piecewise":
+        return cmd_piecewise(args)
     parser.error(f"unknown command: {args.command}")
     return 2
