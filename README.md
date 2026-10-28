@@ -606,3 +606,28 @@ print(res.recommendation, res.cumulative_strong_regret, res.cumulative_weak_regr
 ```bash
 bandit-kit duel --utilities 0,0.3,0.6,1.0,0.8 --horizon 2000 --runs 10
 ```
+
+## Piecewise-stationary bandits (CUSUM-UCB, M-UCB)
+
+When arm means jump at a few unknown times, *actively adaptive* policies run
+a change-point detector and restart when it fires:
+
+* `CUSUMUCB(m, eps, h, alpha)` — CUSUM-UCB (Liu, Lee & Shroff, AAAI 2018):
+  per-arm two-sided CUSUM test after `m` reference samples; an alarm resets
+  that arm only. UCB on post-reset statistics plus `alpha` uniform exploration.
+* `MUCB(w, b, gamma, horizon)` — Monitored UCB (Cao et al., AISTATS 2019):
+  `gamma` share of forced round-robin exploration and a windowed mean-shift
+  test `|Σ second half − Σ first half| > b` over each arm's last `w` rewards;
+  an alarm restarts all arms. `b` defaults to `sqrt(w/2 · log(2KT²))`.
+* `PiecewiseBernoulli(means, breakpoints)` environment, `run_piecewise`
+  (dynamic regret vs. the best arm of the current segment, alarm times,
+  detection delays) and `compare_piecewise` (also runs SW-UCB, D-UCB and UCB1).
+
+```python
+from bandit_kit import compare_piecewise
+compare_piecewise([[0.9, 0.5], [0.3, 0.5]], breakpoints=[1500], horizon=3000, runs=10)
+```
+
+```bash
+bandit-kit piecewise --means "0.9,0.5;0.3,0.5" --breakpoints 1500 --horizon 3000 --runs 10
+```

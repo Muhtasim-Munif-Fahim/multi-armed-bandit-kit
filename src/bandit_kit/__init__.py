@@ -1,5 +1,14 @@
 """Multi-armed bandit algorithms, experiments, and reporting."""
 
+from .changepoint import (
+    CUSUMUCB,
+    MUCB,
+    PiecewiseBernoulli,
+    PiecewiseResult,
+    compare_piecewise,
+    mucb_threshold,
+    run_piecewise,
+)
 from .dueling import (
     DoubleThompsonSampling,
     DuelingPolicy,
@@ -135,6 +144,13 @@ from .visualization import (
 )
 
 __all__ = [
+    "CUSUMUCB",
+    "MUCB",
+    "PiecewiseBernoulli",
+    "PiecewiseResult",
+    "compare_piecewise",
+    "mucb_threshold",
+    "run_piecewise",
     "DoubleThompsonSampling",
     "DuelingPolicy",
     "DuelingResult",
