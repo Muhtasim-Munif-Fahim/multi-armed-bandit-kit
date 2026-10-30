@@ -130,6 +130,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_offpolicy_parser(sub)
     _build_duel_parser(sub)
     _build_piecewise_parser(sub)
+    _build_cascade_parser(sub)
     _build_contextual_parser(sub)
     return parser
 
@@ -636,6 +637,47 @@ def cmd_piecewise(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_cascade_parser(sub) -> None:
+    cas = sub.add_parser(
+        "cascade",
+        help="Cascading bandits (CascadeUCB1, CascadeKL-UCB, CascadeTS) for learning to rank from clicks",
+    )
+    cas.add_argument("--attractions", required=True, help="Comma-separated item attraction probabilities")
+    cas.add_argument("--k", type=int, default=2, help="List length shown to each user (default: 2)")
+    cas.add_argument("--horizon", type=int, default=2000, help="Rounds per run (default: 2000)")
+    cas.add_argument("--runs", type=int, default=10, help="Independent runs (default: 10)")
+    cas.add_argument("--policies", default="cascade_ucb1,cascade_kl_ucb,cascade_ts,cascade_epsilon_greedy,random",
+                     help="Comma-separated policies")
+    cas.add_argument("--epsilon", type=float, default=0.1, help="Epsilon for cascade_epsilon_greedy (default: 0.1)")
+    cas.add_argument("--seed", type=int, default=0, help="Base random seed (default: 0)")
+    cas.add_argument("--json", action="store_true", help="Print JSON instead of a table")
+
+
+def cmd_cascade(args: argparse.Namespace) -> int:
+    from .cascade import CascadeEnvironment, compare_cascade
+
+    try:
+        w = [float(v) for v in args.attractions.split(",") if v.strip()]
+        if args.horizon <= 0 or args.runs <= 0:
+            raise ValueError("--horizon and --runs must be positive")
+        env = CascadeEnvironment(w, args.k)
+        policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+        table = compare_cascade(w, args.k, horizon=args.horizon, runs=args.runs, policies=policies,
+                                seed=args.seed, epsilon=args.epsilon)
+    except ValueError as exc:
+        print(f"cascade: {exc}", file=sys.stderr)
+        return 2
+    best = env.optimal_ranking()
+    if args.json:
+        print(json.dumps({"optimal_ranking": best, "optimal_value": env.optimal_value(), "results": table}, indent=2))
+        return 0
+    print(f"optimal list: {best}  click prob: {env.optimal_value():.3f}  horizon: {args.horizon}  runs: {args.runs}")
+    print(f"{'policy':<24} {'regret':>9} {'click rate':>11} {'top-K found':>12}")
+    for name, row in table.items():
+        print(f"{name:<24} {row['regret']:>9.2f} {row['click_rate']:>11.3f} {row['optimal_rate']:>11.0%}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -653,5 +695,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_duel(args)
     if args.command == "piecewise":
         return cmd_piecewise(args)
+    if args.command == "cascade":
+        return cmd_cascade(args)
     parser.error(f"unknown command: {args.command}")
     return 2

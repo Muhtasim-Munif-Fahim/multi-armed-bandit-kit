@@ -1,5 +1,19 @@
 """Multi-armed bandit algorithms, experiments, and reporting."""
 
+from .cascade import (
+    CASCADE_POLICIES,
+    CascadeEnvironment,
+    CascadeEpsilonGreedy,
+    CascadeKLUCB,
+    CascadePolicy,
+    CascadeResult,
+    CascadeTS,
+    CascadeUCB1,
+    RandomRanker,
+    cascade_click_probability,
+    compare_cascade,
+    run_cascade,
+)
 from .changepoint import (
     CUSUMUCB,
     MUCB,
@@ -144,6 +158,18 @@ from .visualization import (
 )
 
 __all__ = [
+    "CASCADE_POLICIES",
+    "CascadeEnvironment",
+    "CascadeEpsilonGreedy",
+    "CascadeKLUCB",
+    "CascadePolicy",
+    "CascadeResult",
+    "CascadeTS",
+    "CascadeUCB1",
+    "RandomRanker",
+    "cascade_click_probability",
+    "compare_cascade",
+    "run_cascade",
     "CUSUMUCB",
     "MUCB",
     "PiecewiseBernoulli",
