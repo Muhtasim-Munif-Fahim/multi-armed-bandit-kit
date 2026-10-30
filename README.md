@@ -631,3 +631,24 @@ compare_piecewise([[0.9, 0.5], [0.3, 0.5]], breakpoints=[1500], horizon=3000, ru
 ```bash
 bandit-kit piecewise --means "0.9,0.5;0.3,0.5" --breakpoints 1500 --horizon 3000 --runs 10
 ```
+
+## Cascading bandits (learning to rank from clicks)
+
+In the cascade model, a user scans a list of `K` items from the top and clicks the first attractive one; item `e` attracts with probability `w(e)`. The list's click probability is `1 - prod(1 - w(a_k))`. One click reveals that every item above it was skipped and that the clicked item attracted. Items below it are never examined, so nothing is learned about them.
+
+* `CascadeUCB1(c=1.5)`, `CascadeKLUCB(c=3)` (Kveton, Szepesvári, Wen & Ashkan, ICML 2015) and
+  `CascadeTS` (Beta posterior sampling; Cheung et al. 2019) rank items by optimistic or sampled
+  attraction estimates. `CascadeEpsilonGreedy` and `RandomRanker` are baselines.
+* `CascadeEnvironment(attractions, k)` simulates clicks. `run_cascade` records expected regret
+  `f(A*) - f(A_t)`, and `compare_cascade` averages regret, click rate and the share of runs whose
+  final list recovers the optimal top-`K` set.
+
+```python
+from bandit_kit import compare_cascade
+compare_cascade([0.2, 0.15, 0.1, 0.05, 0.05, 0.03], k=2, horizon=3000, runs=10)
+```
+
+```bash
+bandit-kit cascade --attractions 0.2,0.15,0.1,0.05,0.05,0.03,0.02,0.02 --k 2 --horizon 3000 --runs 5
+```
+
