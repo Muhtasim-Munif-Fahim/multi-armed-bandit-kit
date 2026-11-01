@@ -131,6 +131,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_duel_parser(sub)
     _build_piecewise_parser(sub)
     _build_cascade_parser(sub)
+    _build_continuum_parser(sub)
     _build_contextual_parser(sub)
     return parser
 
@@ -678,6 +679,57 @@ def cmd_cascade(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_continuum_parser(sub) -> None:
+    con = sub.add_parser(
+        "continuum",
+        help="Continuum-armed Lipschitz bandits on [0, 1]: zooming algorithm vs uniform discretization",
+    )
+    con.add_argument("--payoff", default="triangle",
+                     help="Mean function: triangle, two_peaks, smooth or needle (default: triangle)")
+    con.add_argument("--horizon", type=int, default=3000, help="Rounds per run (default: 3000)")
+    con.add_argument("--runs", type=int, default=10, help="Independent runs (default: 10)")
+    con.add_argument("--policies", default="zooming,uniform_ucb,uniform_ts,random", help="Comma-separated policies")
+    con.add_argument("--noise", choices=["bernoulli", "gaussian"], default="bernoulli",
+                     help="Reward noise (default: bernoulli)")
+    con.add_argument("--sigma", type=float, default=0.1, help="Gaussian noise std (default: 0.1)")
+    con.add_argument("--lipschitz", type=float, default=None,
+                     help="Lipschitz constant given to the policies (default: the payoff's own)")
+    con.add_argument("--k", type=int, default=None,
+                     help="Grid size for uniform policies (default: ceil((L^2 T / log T)^(1/3)))")
+    con.add_argument("--c", type=float, default=2.0, help="Zooming confidence-radius scale (default: 2)")
+    con.add_argument("--seed", type=int, default=0, help="Base random seed (default: 0)")
+    con.add_argument("--json", action="store_true", help="Print JSON instead of a table")
+
+
+def cmd_continuum(args: argparse.Namespace) -> int:
+    from .continuum import CONTINUUM_PAYOFFS, ContinuumEnvironment, compare_continuum
+
+    try:
+        if args.horizon <= 0 or args.runs <= 0:
+            raise ValueError("--horizon and --runs must be positive")
+        if args.lipschitz is not None and args.lipschitz <= 0:
+            raise ValueError("--lipschitz must be positive")
+        policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+        table = compare_continuum(args.payoff, horizon=args.horizon, runs=args.runs, policies=policies,
+                                  seed=args.seed, noise=args.noise, sigma=args.sigma,
+                                  lipschitz=args.lipschitz, k=args.k, c=args.c)
+    except ValueError as exc:
+        print(f"continuum: {exc}", file=sys.stderr)
+        return 2
+    fn, L = CONTINUUM_PAYOFFS[args.payoff]
+    env = ContinuumEnvironment(fn)
+    if args.json:
+        print(json.dumps({"payoff": args.payoff, "argmax": env.argmax, "optimum": env.optimum,
+                          "lipschitz": L if args.lipschitz is None else args.lipschitz, "results": table}, indent=2))
+        return 0
+    print(f"payoff: {args.payoff}  argmax: {env.argmax:.3f}  mu*: {env.optimum:.3f}  "
+          f"horizon: {args.horizon}  runs: {args.runs}")
+    print(f"{'policy':<14} {'regret':>9} {'arms':>7} {'|x_hat - x*|':>13}")
+    for name, row in table.items():
+        print(f"{name:<14} {row['regret']:>9.1f} {row['arms']:>7.1f} {row['argmax_error']:>13.4f}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -697,5 +749,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_piecewise(args)
     if args.command == "cascade":
         return cmd_cascade(args)
+    if args.command == "continuum":
+        return cmd_continuum(args)
     parser.error(f"unknown command: {args.command}")
     return 2
