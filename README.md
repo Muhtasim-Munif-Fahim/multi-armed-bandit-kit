@@ -652,3 +652,27 @@ compare_cascade([0.2, 0.15, 0.1, 0.05, 0.05, 0.03], k=2, horizon=3000, runs=10)
 bandit-kit cascade --attractions 0.2,0.15,0.1,0.05,0.05,0.03,0.02,0.02 --k 2 --horizon 3000 --runs 5
 ```
 
+## Continuum-armed (Lipschitz) bandits
+
+Here the arms form the whole interval `[0, 1]`, and the mean reward `mu(x)` is only assumed to be `L`-Lipschitz.
+
+* `ZoomingAlgorithm(lipschitz, c=2)` (Kleinberg, Slivkins & Upfal, STOC 2008) keeps a confidence ball of radius
+  `sqrt(c log T / (1 + n(x)))` in the metric `L|x - y|` around each active arm. It activates any point
+  that is left uncovered and plays the largest `mu_hat + 2r`, so arms concentrate near the optimum.
+* `UniformDiscretizationUCB` and `UniformDiscretizationTS` run UCB1 or Thompson sampling on
+  `K = ceil((L^2 T / log T)^(1/3))` evenly spaced points (`default_discretization`). This is the
+  worst-case-optimal `O~(T^(2/3))` approach (Kleinberg 2004). `RandomContinuumPolicy` is a baseline.
+* `ContinuumEnvironment(mean_fn, noise="bernoulli"|"gaussian")` computes `mu*` and its argmax on a
+  dense grid. `CONTINUUM_PAYOFFS` provides `triangle`, `two_peaks`, `smooth` and `needle` along
+  with their Lipschitz constants. `compare_continuum` reports regret, the number of arms used, and
+  the error of the final argmax estimate.
+
+```python
+from bandit_kit import compare_continuum
+compare_continuum("two_peaks", horizon=5000, runs=5)
+```
+
+```bash
+bandit-kit continuum --payoff needle --horizon 5000 --runs 5
+```
+
