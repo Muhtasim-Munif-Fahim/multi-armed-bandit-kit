@@ -580,6 +580,30 @@ bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 0.1,0.1,0.8 --lo
 bandit-kit offpolicy --arms bern:0.3,bern:0.5,bern:0.7 --target 2 --clip 5 --replay ucb1 --json
 ```
 
+## Heavy-tailed rewards (Robust UCB)
+
+UCB1, KL-UCB and Thompson sampling assume bounded or sub-Gaussian rewards.
+`RobustUCB` (Bubeck, Cesa-Bianchi & Lugosi, 2013) only assumes a finite
+`(1 + epsilon)`-th moment bounded by `moment_bound`. It replaces the
+empirical mean with a **truncated mean** (`estimator="truncated"`) or a
+**median of means** (`estimator="median_of_means"`, the default) and uses
+the matching confidence width with `delta = t^-2`. The `confidence_scale`
+knob shrinks the conservative theoretical width. `StudentTArm` (spec
+`t:<mean>:<df>[:<scale>]`) generates heavy-tailed rewards, with infinite
+variance when `df <= 2`.
+
+```python
+from bandit_kit import BanditExperiment, StudentTArm
+
+arms = [StudentTArm("a", 0.0, df=1.6), StudentTArm("b", 0.5, df=1.6)]
+exp = BanditExperiment(arms=arms, algorithms=["ucb1", "robust_ucb"], steps=1500, runs=20)
+summary = exp.summarize(exp.run())
+```
+
+On three Student-t(1.6) arms over 1500 steps, the truncated estimator with
+`confidence_scale=0.2` has lower mean and worst-case regret than UCB1 across
+seeds (see `tests/test_heavy_tailed.py`).
+
 ## Dueling bandits (pairwise preferences)
 
 When feedback is relative — interleaved ranker clicks, "which response is

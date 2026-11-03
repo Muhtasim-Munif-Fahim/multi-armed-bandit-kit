@@ -72,12 +72,49 @@ class GaussianArm(Arm):
         self.std = float(std)
 
 
+class StudentTArm(Arm):
+    """An arm with heavy-tailed rewards ``mean + scale * T`` where ``T ~ Student-t(df)``.
+
+    ``df > 1`` keeps the mean finite. For ``df <= 2`` the variance is
+    infinite, which breaks the sub-Gaussian assumption behind UCB1 and
+    Thompson sampling. Use it to stress-test robust policies such as
+    :class:`bandit_kit.heavy_tailed.RobustUCB`. Only absolute moments of order
+    ``< df`` exist. ``reward_range`` is a nominal +-4 scale band for reporting.
+    """
+
+    def __init__(
+        self, name: str, mean: float, df: float, scale: float = 1.0, *, seed: int | None = None
+    ) -> None:
+        if not df > 1.0:
+            raise ValueError("Student-t df must be > 1 for a finite mean")
+        if scale <= 0.0:
+            raise ValueError("Student-t scale must be positive")
+        rng = random.Random(seed)
+        m, nu, sc = float(mean), float(df), float(scale)
+
+        def draw() -> float:
+            z = rng.gauss(0.0, 1.0)
+            chi2 = rng.gammavariate(nu / 2.0, 2.0)
+            return m + sc * z / math.sqrt(chi2 / nu)
+
+        super().__init__(
+            name=name,
+            expected_value=m,
+            draw=draw,
+            reward_range=(m - 4.0 * sc, m + 4.0 * sc),
+        )
+        self.mean = m
+        self.df = nu
+        self.scale = sc
+
+
 def arm_from_spec(spec: str) -> Arm:
     """Construct an Arm from a short string spec.
 
     Supported formats:
       ``bern:<p>``        -> BernoulliArm with success probability p
       ``gauss:<m>:<s>``   -> GaussianArm with mean m and std s
+      ``t:<m>:<df>[:<s>]`` -> StudentTArm with mean m, df degrees of freedom, scale s
 
     Specs without a recognised prefix raise ``ValueError``.
     """
@@ -91,6 +128,9 @@ def arm_from_spec(spec: str) -> Arm:
         mean = float(parts[1])
         std = float(parts[2])
         return GaussianArm(name=spec, mean=mean, std=std)
+    if kind == "t" and len(parts) in (3, 4):
+        scale = float(parts[3]) if len(parts) == 4 else 1.0
+        return StudentTArm(name=spec, mean=float(parts[1]), df=float(parts[2]), scale=scale)
     raise ValueError(f"unrecognised arm spec: {spec!r}")
 
 
