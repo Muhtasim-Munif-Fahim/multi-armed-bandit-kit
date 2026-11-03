@@ -171,7 +171,15 @@ from .visualization import (
     save_all_plots,
 )
 
+from .heavy_tailed import RobustUCB, median_of_means, robust_ucb, truncated_mean
+from .arms import StudentTArm
+
 __all__ = [
+    "RobustUCB",
+    "StudentTArm",
+    "median_of_means",
+    "robust_ucb",
+    "truncated_mean",
     "CASCADE_POLICIES",
     "CascadeEnvironment",
     "CascadeEpsilonGreedy",

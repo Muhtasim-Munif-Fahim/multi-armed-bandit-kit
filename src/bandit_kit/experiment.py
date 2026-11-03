@@ -35,11 +35,13 @@ from .algorithms import (
     ucb1,
     ucb_tuned,
 )
+from .heavy_tailed import robust_ucb
 from .arms import (
     Arm,
     BernoulliArm,
     GaussianArm,
     LinearContextualArm,
+    StudentTArm,
     expected_payoffs,
     sample_context,
 )
@@ -71,6 +73,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "ucb_v": ucb_v,
     "ucb2": ucb2,
     "moss": moss,
+    "robust_ucb": robust_ucb,
 }
 
 
@@ -261,6 +264,10 @@ class BanditExperiment:
             elif isinstance(arm, GaussianArm):
                 seeded.append(
                     GaussianArm(name=arm.name, mean=arm.mean, std=arm.std, seed=child_seed)
+                )
+            elif isinstance(arm, StudentTArm):
+                seeded.append(
+                    StudentTArm(name=arm.name, mean=arm.mean, df=arm.df, scale=arm.scale, seed=child_seed)
                 )
             else:
                 # Fallback: keep the original draw; non-deterministic arms
