@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Thompson sampling (Bernoulli and Gaussian), EXP3, EXP3-IX, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Explore-Then-Commit, Thompson sampling (Bernoulli and Gaussian), EXP3, EXP3-IX, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -2001,6 +2001,91 @@ def ucb_v(c: float = 3.0, *, seed: int | None = None) -> BanditAlgorithm:
 def moss(horizon: int = 200, *, seed: int | None = None) -> BanditAlgorithm:
     return MOSS(horizon=horizon, seed=seed)
 
+class ExploreThenCommit(BanditAlgorithm):
+    """Explore-Then-Commit (ETC) — the classic two-phase baseline.
+
+    During the exploration phase every arm is pulled ``exploration_rounds``
+    times in round-robin order (``K * m`` pulls in total for ``K`` arms).
+    Afterwards the policy commits forever to the arm with the highest
+    empirical mean (ties broken by the lowest index).
+
+    With gap ``Delta`` between the best and second-best arm, choosing
+    ``m ~ (4 / Delta^2) * log(T * Delta^2 / 4)`` gives the textbook
+    ``O(log T / Delta)`` regret bound (Lattimore & Szepesvári, ch. 6);
+    :meth:`optimal_exploration_rounds` returns that value for a known gap.
+    """
+
+    def __init__(self, exploration_rounds: int = 10, *, seed: int | None = None) -> None:
+        super().__init__(seed=seed)
+        if (
+            isinstance(exploration_rounds, bool)
+            or not isinstance(exploration_rounds, int)
+            or exploration_rounds < 1
+        ):
+            raise ValueError("exploration_rounds must be an integer >= 1")
+        self.exploration_rounds = int(exploration_rounds)
+        self._counts: List[int] = []
+        self._sums: List[float] = []
+        self._pulls = 0
+        self._committed: int | None = None
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        n = len(arms)
+        self._counts = [0] * n
+        self._sums = [0.0] * n
+        self._pulls = 0
+        self._committed = None
+
+    @property
+    def committed_arm(self) -> int | None:
+        """Index of the arm committed to, or ``None`` while still exploring."""
+        return self._committed
+
+    @property
+    def is_exploring(self) -> bool:
+        return self._committed is None
+
+    @staticmethod
+    def optimal_exploration_rounds(horizon: int, gap: float) -> int:
+        """Return ``max(1, ceil(4/gap^2 * log(horizon * gap^2 / 4)))``."""
+        if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
+            raise ValueError("horizon must be an integer >= 1")
+        if not (gap > 0.0):
+            raise ValueError("gap must be > 0")
+        arg = horizon * gap * gap / 4.0
+        if arg <= 1.0:
+            return 1
+        return max(1, math.ceil(4.0 / (gap * gap) * math.log(arg)))
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        if self._committed is not None:
+            return self._committed
+        n = len(arms)
+        if self._pulls < n * self.exploration_rounds:
+            return self._pulls % n
+        means = [s / c if c else -math.inf for s, c in zip(self._sums, self._counts)]
+        best = max(means)
+        self._committed = means.index(best)
+        return self._committed
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        self._counts[idx] += 1
+        self._sums[idx] += float(step.reward)
+        self._pulls += 1
+
+
+def explore_then_commit(
+    exploration_rounds: int = 10, *, seed: int | None = None
+) -> BanditAlgorithm:
+    """Factory for :class:`ExploreThenCommit`."""
+    return ExploreThenCommit(exploration_rounds=exploration_rounds, seed=seed)
+
+
 
 
 def thompson_sampling_bernoulli(*, seed: int | None = None) -> BanditAlgorithm:
@@ -2156,6 +2241,7 @@ __all__ = [
     "UCBV",
     "UCB2",
     "MOSS",
+    "ExploreThenCommit",
     "ThompsonBernoulli",
     "GaussianThompson",
     "ThompsonGaussian",
@@ -2168,6 +2254,7 @@ __all__ = [
     "ucb_v",
     "ucb2",
     "moss",
+    "explore_then_commit",
     "thompson_sampling_bernoulli",
     "thompson_sampling_gaussian",
     "thompson_gaussian",

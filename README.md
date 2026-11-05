@@ -416,6 +416,21 @@ experiment = BanditExperiment(
 ```
 
 
+### Explore-Then-Commit
+
+`ExploreThenCommit` / `explore_then_commit(exploration_rounds=10)` pulls every
+arm `m` times round-robin, then commits for the rest of the run to the arm with
+the best empirical mean. `ExploreThenCommit.optimal_exploration_rounds(T, gap)`
+returns the textbook `m = ceil(4/gap^2 * log(T * gap^2 / 4))` for a known gap.
+The registry name is `"explore_then_commit"`.
+
+```python
+from bandit_kit import BernoulliArm, run_experiment
+
+arms = [BernoulliArm(name="A", p=0.2), BernoulliArm(name="B", p=0.6)]
+results = run_experiment(arms, algorithms=["explore_then_commit", "ucb1"], steps=200, runs=10)
+```
+
 ### MOSS
 
 MOSS (Audibert & Bubeck) is a finite-horizon UCB-style policy. After every
