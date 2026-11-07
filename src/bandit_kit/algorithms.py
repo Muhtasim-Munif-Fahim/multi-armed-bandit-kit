@@ -1,4 +1,4 @@
-"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Explore-Then-Commit, Thompson sampling (Bernoulli and Gaussian), EXP3, EXP3-IX, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
+"""Bandit algorithm implementations: epsilon-greedy, UCB1, UCB-Tuned, sliding-window UCB, DiscountedUCB, UCB-V, UCB2, MOSS, Explore-Then-Commit, VDBE, Thompson sampling (Bernoulli and Gaussian), EXP3, EXP3-IX, LinUCB, LinTS, Boltzmann, KL-UCB, IMED, Tsallis-INF.
 
 Each algorithm exposes a ``BanditAlgorithm`` factory. The factory
 returns an object that owns the algorithm's runtime state and exposes a
@@ -2086,6 +2086,94 @@ def explore_then_commit(
     return ExploreThenCommit(exploration_rounds=exploration_rounds, seed=seed)
 
 
+class VDBE(BanditAlgorithm):
+    """Value-Difference Based Exploration (Tokic, 2010).
+
+    An adaptive epsilon-greedy policy: after observing reward ``r`` on the
+    chosen arm whose pre-update value is ``Q``, epsilon is smoothed toward a
+    surprise signal
+
+        f = 1 - exp(-|r - Q| / sigma)
+
+    via ``epsilon <- delta * f + (1 - delta) * epsilon``. Large prediction
+    errors raise epsilon (more exploration); calm periods decay it toward 0.
+    Selection is otherwise standard epsilon-greedy (uniform explore / greedy
+    exploit), with an initial round-robin until every arm has been pulled.
+    """
+
+    name = "vdbe"
+
+    def __init__(
+        self,
+        delta: float = 0.1,
+        sigma: float = 1.0,
+        epsilon: float = 1.0,
+        *,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if isinstance(delta, bool) or not isinstance(delta, (int, float)) or not 0.0 < float(delta) <= 1.0:
+            raise ValueError("delta must be in (0, 1]")
+        if isinstance(sigma, bool) or not isinstance(sigma, (int, float)) or not float(sigma) > 0.0:
+            raise ValueError("sigma must be a positive number")
+        if isinstance(epsilon, bool) or not isinstance(epsilon, (int, float)) or not 0.0 <= float(epsilon) <= 1.0:
+            raise ValueError("epsilon must be in [0, 1]")
+        self.delta = float(delta)
+        self.sigma = float(sigma)
+        self._epsilon0 = float(epsilon)
+        self._epsilon = float(epsilon)
+        self._counts: List[int] = []
+        self._values: List[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        self._counts = [0] * len(arms)
+        self._values = [0.0] * len(arms)
+        self._epsilon = self._epsilon0
+
+    @property
+    def epsilon(self) -> float:
+        """Current exploration probability."""
+        return self._epsilon
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        if not self._counts:
+            self.reset(arms)
+        if any(c == 0 for c in self._counts):
+            return self._counts.index(0)
+        if self._rng.random() < self._epsilon:
+            return self._rng.randrange(len(arms))
+        best = max(self._values)
+        candidates = [idx for idx, value in enumerate(self._values) if value == best]
+        return candidates[0]
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        if not self._counts:
+            self.reset(arms)
+        idx = step.arm_index
+        q_before = self._values[idx]
+        n = self._counts[idx]
+        new_n = n + 1
+        reward = float(step.reward)
+        self._values[idx] += (reward - self._values[idx]) / new_n
+        self._counts[idx] = new_n
+        # Tokic (2010): f = 1 - exp(-|r - Q| / sigma)
+        surprise = 1.0 - math.exp(-abs(reward - q_before) / self.sigma)
+        self._epsilon = self.delta * surprise + (1.0 - self.delta) * self._epsilon
+
+
+def vdbe(
+    delta: float = 0.1,
+    sigma: float = 1.0,
+    epsilon: float = 1.0,
+    *,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    """Factory for :class:`VDBE`."""
+    return VDBE(delta=delta, sigma=sigma, epsilon=epsilon, seed=seed)
+
+
+
+
 
 
 def thompson_sampling_bernoulli(*, seed: int | None = None) -> BanditAlgorithm:
@@ -2242,6 +2330,7 @@ __all__ = [
     "UCB2",
     "MOSS",
     "ExploreThenCommit",
+    "VDBE",
     "ThompsonBernoulli",
     "GaussianThompson",
     "ThompsonGaussian",
@@ -2255,6 +2344,7 @@ __all__ = [
     "ucb2",
     "moss",
     "explore_then_commit",
+    "vdbe",
     "thompson_sampling_bernoulli",
     "thompson_sampling_gaussian",
     "thompson_gaussian",

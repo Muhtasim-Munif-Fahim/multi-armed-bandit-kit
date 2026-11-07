@@ -2,7 +2,7 @@
 
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
-stochastic policies (`epsilon-greedy`, `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
+stochastic policies (`epsilon-greedy`, `VDBE` (value-difference based exploration), `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
 `KL-UCB`, `IMED`) plus the adversarial-bandit policies `EXP3`, `EXP3-IX`, and the switching-adversary
 `EXP3.S`, the best-of-both-worlds
 policy `Tsallis-INF`, the contextual
@@ -12,6 +12,23 @@ It provides seedable synthetic Bernoulli,
 Gaussian, and linear contextual arms, runs a configurable experiment
 harness, and emits a Markdown report comparing cumulative reward,
 cumulative regret, and per-arm selection rates.
+
+## VDBE (Value-Difference Based Exploration)
+
+`vdbe` / `VDBE` is Tokic's (2010) adaptive epsilon-greedy policy. After each
+reward the exploration rate is smoothed toward a surprise signal
+`1 - exp(-|r - Q| / sigma)`, so large prediction errors raise epsilon and calm
+periods let it decay. Tune with `delta` (smoothing rate in `(0, 1]`) and
+`sigma` (reward-scale sensitivity).
+
+```python
+from bandit_kit import vdbe, BernoulliArm, BanditExperiment
+
+arms = [BernoulliArm("A", 0.1), BernoulliArm("B", 0.5), BernoulliArm("C", 0.2)]
+algo = vdbe(delta=0.2, sigma=1.0, seed=0)
+experiment = BanditExperiment(arms=arms, algorithms=["vdbe"], steps=200, runs=10, seed=0)
+print(experiment.summarize(experiment.run()))
+```
 
 ## Install
 
