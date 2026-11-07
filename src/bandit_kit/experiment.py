@@ -26,6 +26,7 @@ from .algorithms import (
     linucb,
     moss,
     explore_then_commit,
+    vdbe,
     sliding_window_ucb,
     sliding_window_thompson,
     discounted_ucb,
@@ -75,6 +76,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "ucb2": ucb2,
     "moss": moss,
     "explore_then_commit": explore_then_commit,
+    "vdbe": vdbe,
     "robust_ucb": robust_ucb,
 }
 
