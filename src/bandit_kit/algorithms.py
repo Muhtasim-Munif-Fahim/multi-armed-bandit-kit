@@ -39,7 +39,7 @@ class BanditAlgorithm:
     """A bandit algorithm with a mutable state container.
 
     The factory functions :func:`epsilon_greedy`, :func:`ucb1`,
-    :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`exp3_ix`, :func:`exp3_s`, :func:`linucb`,
+    :func:`thompson_sampling_bernoulli`, :func:`thompson_sampling_gaussian`, :func:`exp3`, :func:`exp3_ix`, :func:`exp3_p`, :func:`exp3_s`, :func:`linucb`,
     :func:`lints`, :func:`boltzmann`, :func:`kl_ucb`, :func:`sliding_window_ucb`, :func:`sliding_window_thompson`, :func:`discounted_ucb`, :func:`moss`, and :func:`tsallis_inf` return subclasses of this object.
     ``reset`` rebuilds the algorithm's state so the same factory can be
     reused across independent runs.
@@ -490,6 +490,109 @@ class Exp3IX(BanditAlgorithm):
         max_weight = max(self._weights)
         if max_weight > 0.0:
             self._weights = [weight / max_weight for weight in self._weights]
+        self._last_probabilities = []
+
+
+class Exp3P(BanditAlgorithm):
+    """EXP3.P: EXP3 with high-probability regret guarantees.
+
+    Auer, Cesa-Bianchi, Freund & Schapire (2002), in the parameterisation of
+    Bubeck & Cesa-Bianchi (2012, Thm. 3.3). Plain EXP3 only bounds the
+    *expected* regret; its importance-weighted estimates have heavy upper
+    tails. EXP3.P adds an optimistic bias ``beta / p_i`` to the estimated
+    gain of **every** arm each round,
+
+        ``G_i += (reward * 1[I_t = i] + beta) / p_i``,
+
+    and plays ``p = (1 - gamma) * softmax(eta * G) + gamma / K``. With a known
+    ``horizon`` n and confidence ``delta`` the defaults
+
+        ``beta = sqrt(log(K / delta) / (n K))``,
+        ``eta = 0.95 sqrt(log(K) / (n K))``,
+        ``gamma = 1.05 sqrt(K log(K) / n)``
+
+    give regret ``O(sqrt(n K log(K / delta)))`` with probability ``1 - delta``.
+    Any of ``eta``, ``gamma`` or ``beta`` can be set explicitly instead. Gains
+    are kept on the log scale (softmax with max subtraction) so long runs do
+    not overflow. Rewards are clipped to [0, 1].
+    """
+
+    def __init__(
+        self,
+        horizon: int = 1000,
+        delta: float = 0.05,
+        *,
+        eta: float | None = None,
+        gamma: float | None = None,
+        beta: float | None = None,
+        seed: int | None = None,
+    ) -> None:
+        super().__init__(seed=seed)
+        if isinstance(horizon, bool) or int(horizon) != horizon or horizon < 1:
+            raise ValueError("horizon must be a positive integer")
+        if not 0.0 < delta < 1.0:
+            raise ValueError("delta must be in (0, 1)")
+        if eta is not None and eta <= 0.0:
+            raise ValueError("eta must be positive")
+        if gamma is not None and not 0.0 < gamma <= 1.0:
+            raise ValueError("gamma must be in (0, 1]")
+        if beta is not None and not 0.0 <= beta <= 1.0:
+            raise ValueError("beta must be in [0, 1]")
+        self.horizon = int(horizon)
+        self.delta = float(delta)
+        self._eta_override = eta
+        self._gamma_override = gamma
+        self._beta_override = beta
+        self.eta = 0.0
+        self.gamma = 0.0
+        self.beta = 0.0
+        self._gains: list[float] = []
+        self._last_probabilities: list[float] = []
+
+    def reset(self, arms: Sequence[Arm]) -> None:
+        k = len(arms)
+        n = self.horizon
+        log_k = math.log(k) if k > 1 else 0.0
+        self.beta = (
+            self._beta_override
+            if self._beta_override is not None
+            else min(1.0, math.sqrt(math.log(k / self.delta) / (n * k)))
+        )
+        default_eta = 0.95 * math.sqrt(log_k / (n * k)) if log_k > 0 else 1.0
+        self.eta = self._eta_override if self._eta_override is not None else default_eta
+        default_gamma = 1.05 * math.sqrt(k * log_k / n) if log_k > 0 else 1.0
+        self.gamma = (
+            self._gamma_override if self._gamma_override is not None else min(1.0, default_gamma)
+        )
+        self._gains = [0.0] * k
+        self._last_probabilities = []
+
+    def _distribution(self) -> list[float]:
+        n = len(self._gains)
+        top = max(self._gains)
+        exps = [math.exp(self.eta * (g - top)) for g in self._gains]
+        total = sum(exps)
+        return [(1.0 - self.gamma) * e / total + self.gamma / n for e in exps]
+
+    def select_arm(self, arms: Sequence[Arm], step: int) -> int:
+        probabilities = self._distribution()
+        self._last_probabilities = probabilities
+        r = self._rng.random()
+        cumulative = 0.0
+        for idx, prob in enumerate(probabilities):
+            cumulative += prob
+            if r < cumulative:
+                return idx
+        return len(probabilities) - 1
+
+    def update(self, arms: Sequence[Arm], step: BanditStep) -> None:
+        n = len(self._gains)
+        if len(self._last_probabilities) != n:
+            self._last_probabilities = self._distribution()
+        reward = min(1.0, max(0.0, float(step.reward)))
+        for i, prob in enumerate(self._last_probabilities):
+            observed = reward if i == step.arm_index else 0.0
+            self._gains[i] += (observed + self.beta) / prob
         self._last_probabilities = []
 
 
@@ -2243,6 +2346,19 @@ def exp3_ix(
     seed: int | None = None,
 ) -> BanditAlgorithm:
     return Exp3IX(eta=eta, gamma=gamma, seed=seed)
+
+
+def exp3_p(
+    horizon: int = 1000,
+    delta: float = 0.05,
+    *,
+    eta: float | None = None,
+    gamma: float | None = None,
+    beta: float | None = None,
+    seed: int | None = None,
+) -> BanditAlgorithm:
+    """Factory for :class:`Exp3P` (EXP3.P, high-probability regret)."""
+    return Exp3P(horizon=horizon, delta=delta, eta=eta, gamma=gamma, beta=beta, seed=seed)
 
 
 def exp3_s(

@@ -27,6 +27,7 @@ from .algorithms import (
     moss,
     explore_then_commit,
     vdbe,
+    exp3_p,
     sliding_window_ucb,
     sliding_window_thompson,
     discounted_ucb,
@@ -77,6 +78,7 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "moss": moss,
     "explore_then_commit": explore_then_commit,
     "vdbe": vdbe,
+    "exp3_p": exp3_p,
     "robust_ucb": robust_ucb,
 }
 
@@ -207,6 +209,9 @@ class BanditExperiment:
             return factory(eta=self.exp3_ix_eta, seed=seed)
         if name == "exp3_s":
             return factory(gamma=self.gamma, alpha=self.exp3_s_alpha, seed=seed)
+        if name == "exp3_p":
+            # Tune EXP3.P to the experiment length (its guarantees need the horizon).
+            return factory(horizon=self.steps, seed=seed)
         if name == "linucb":
             # Stationary path: intercept-only ridge-UCB (context = [1.0]).
             return factory(
