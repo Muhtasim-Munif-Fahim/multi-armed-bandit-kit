@@ -3,7 +3,7 @@
 A small, dependency-free Python toolkit for studying multi-armed bandit
 algorithms in reproducible research settings. It implements classic
 stochastic policies (`epsilon-greedy`, `VDBE` (value-difference based exploration), `UCB1`, `UCB-Tuned`, `sliding-window UCB`, `SW-TS`, `DiscountedUCB`, `UCB-V`, `UCB2`, `MOSS`, `Thompson sampling`,
-`KL-UCB`, `IMED`) plus the adversarial-bandit policies `EXP3`, `EXP3-IX`, and the switching-adversary
+`KL-UCB`, `IMED`) plus the adversarial-bandit policies `EXP3`, `EXP3-IX`, `EXP3.P` (high-probability regret), and the switching-adversary
 `EXP3.S`, the best-of-both-worlds
 policy `Tsallis-INF`, the contextual
 linear policies `LinUCB` and `LinTS` (linear Thompson sampling), and
@@ -12,6 +12,24 @@ It provides seedable synthetic Bernoulli,
 Gaussian, and linear contextual arms, runs a configurable experiment
 harness, and emits a Markdown report comparing cumulative reward,
 cumulative regret, and per-arm selection rates.
+
+## EXP3.P (high-probability adversarial regret)
+
+`exp3_p` / `Exp3P` (Auer et al. 2002; Bubeck & Cesa-Bianchi 2012, Thm. 3.3)
+adds an optimistic bias `beta / p_i` to every arm's importance-weighted gain
+estimate, so the regret bound `O(sqrt(n K log(K / delta)))` holds with
+probability `1 - delta` rather than only in expectation. Give it the horizon `n`
+and confidence `delta` (or set `eta`, `gamma`, `beta` directly); in
+`BanditExperiment` the horizon is taken from `steps`.
+
+```python
+from bandit_kit import exp3_p, BernoulliArm, BanditExperiment
+
+algo = exp3_p(horizon=10_000, delta=0.05, seed=0)
+experiment = BanditExperiment(arms=[BernoulliArm("A", 0.3), BernoulliArm("B", 0.6)],
+                              algorithms=["exp3", "exp3_p"], steps=2000, runs=10, seed=0)
+print(experiment.summarize(experiment.run()))
+```
 
 ## VDBE (Value-Difference Based Exploration)
 
