@@ -654,6 +654,24 @@ On three Student-t(1.6) arms over 1500 steps, the truncated estimator with
 `confidence_scale=0.2` has lower mean and worst-case regret than UCB1 across
 seeds (see `tests/test_heavy_tailed.py`).
 
+## Perturbed-history (PHE) and sub-sampling (BESA) policies
+
+Two randomised-history policies that need neither posteriors nor confidence
+bounds. `PHE` (Kveton et al. 2019) appends `ceil(a * s)` Bernoulli(1/2)
+pseudo-rewards to an arm's history of `s` rewards and pulls the arm with the
+best perturbed mean (rewards are rescaled to `[0, 1]` with the arms'
+`reward_range`). `BESA` (Baransi, Maillard & Mannor 2014) compares arms by
+sub-sampling the more-pulled arm's history down to the less-pulled arm's size,
+with a knock-out tournament for `K` arms; it has no tuning parameter.
+
+```python
+from bandit_kit import BanditExperiment, BernoulliArm
+
+arms = [BernoulliArm("a", 0.3, seed=1), BernoulliArm("b", 0.7, seed=2)]
+exp = BanditExperiment(arms=arms, algorithms=["phe", "besa", "ucb1"], steps=1000, runs=20)
+summary = exp.summarize(exp.run())
+```
+
 ## Dueling bandits (pairwise preferences)
 
 When feedback is relative — interleaved ranker clicks, "which response is

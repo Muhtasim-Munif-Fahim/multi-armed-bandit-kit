@@ -39,6 +39,7 @@ from .algorithms import (
     ucb_tuned,
 )
 from .heavy_tailed import robust_ucb
+from .nonparametric import besa, phe
 from .arms import (
     Arm,
     BernoulliArm,
@@ -80,6 +81,8 @@ _REGISTRY: Dict[str, Callable[..., BanditAlgorithm]] = {
     "vdbe": vdbe,
     "exp3_p": exp3_p,
     "robust_ucb": robust_ucb,
+    "phe": phe,
+    "besa": besa,
 }
 
 

@@ -178,9 +178,14 @@ from .visualization import (
 )
 
 from .heavy_tailed import RobustUCB, median_of_means, robust_ucb, truncated_mean
+from .nonparametric import BESA, PHE, besa, phe
 from .arms import StudentTArm
 
 __all__ = [
+    "BESA",
+    "PHE",
+    "besa",
+    "phe",
     "RobustUCB",
     "StudentTArm",
     "median_of_means",
